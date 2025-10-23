@@ -1,0 +1,1203 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>drifty is coming</title>
+    <link rel="stylesheet" href="/src/style.css" />
+
+    <link rel="icon" type="image/png" href="/img/favicon-96x96.png" sizes="96x96" />
+    <link rel="icon" type="image/svg+xml" href="/img/favicon.svg" />
+    <link rel="shortcut icon" href="/img/favicon.ico" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/img/apple-touch-icon.png" />
+    <meta name="apple-mobile-web-app-title" content="drifty" />
+    <link rel="manifest" href="/img/site.webmanifest" />
+
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="drifty">
+    <meta property="og:url" content="https://drifty.finance">
+    <meta property="og:image" content="https://drifty.finance/img/open-graph.jpg">
+    <meta property="og:description" content="is coming">
+
+    <meta name="twitter:card" content="summary">
+    <meta name="twitter:site" content="@msqwallet">
+    <meta name="twitter:url" content="https://drifty.finance">
+    <meta name="twitter:title" content="drifty">
+    <meta name="twitter:description" content="is coming">
+    <meta name="twitter:image" content="/img/open-graph.jpg">
+
+    <script>
+        const fonts = [
+          "American Typewriter",
+          "Andale Mono",
+          "Arial",
+          "Arial Black",
+          "Arial Narrow",
+          "Arial Rounded MT Bold",
+          "Arial Unicode MS",
+          "Avenir",
+          "Avenir Next",
+          "Avenir Next Condensed",
+          "Baskerville",
+          "Big Caslon",
+          "Bodoni 72",
+          "Bodoni 72 Oldstyle",
+          "Bodoni 72 Smallcaps",
+          "Bradley Hand",
+          "Brush Script MT",
+          "Chalkboard",
+          "Chalkboard SE",
+          "Chalkduster",
+          "Charter",
+          "Cochin",
+          "Copperplate",
+          "Courier",
+          "Courier New",
+          "Didot",
+          "DIN Alternate",
+          "DIN Condensed",
+          "Futura",
+          "Geneva",
+          "Georgia",
+          "Gill Sans",
+          "Helvetica",
+          "Helvetica Neue",
+          "Herculanum",
+          "Hoefler Text",
+          "Impact",
+          "Lucida Grande",
+          "Luminari",
+          "Marker Felt",
+          "Menlo",
+          "Microsoft Sans Serif",
+          "Monaco",
+          "Noteworthy",
+          "Optima",
+          "Palatino",
+          "Phosphate",
+          "Rockwell",
+          "Savoye LET",
+          "SignPainter",
+          "Skia",
+          "Snell Roundhand",
+          "Tahoma",
+          "Times",
+          "Times New Roman",
+          "Trattatello",
+          "Trebuchet MS",
+          "Verdana",
+          "Zapfino",
+          "Bahnschrift",
+          "Calibri",
+          "Cambria",
+          "Cambria Math",
+          "Candara",
+          "Consolas",
+          "Constantia",
+          "Corbel",
+          "Ebrima",
+          "Franklin Gothic Medium",
+          "Gabriola",
+          "Gadugi",
+          "HoloLens MDL2 Assets",
+          "Ink Free",
+          "Javanese Text",
+          "Leelawadee UI",
+          "Lucida Console",
+          "Lucida Sans Unicode",
+          "Malgun Gothic",
+          "Marlett",
+          "Microsoft Himalaya",
+          "Microsoft JhengHei",
+          "Microsoft New Tai Lue",
+          "Microsoft PhagsPa",
+          "Microsoft Tai Le",
+          "Microsoft YaHei",
+          "Microsoft Yi Baiti",
+          "MingLiU-ExtB",
+          "Mongolian Baiti",
+          "MS Gothic",
+          "MV Boli",
+          "Myanmar Text",
+          "Nirmala UI",
+          "Palatino Linotype",
+          "Segoe MDL2 Assets",
+          "Segoe Print",
+          "Segoe Script",
+          "Segoe UI",
+          "Segoe UI Historic",
+          "Segoe UI Emoji",
+          "Segoe UI Symbol",
+          "Segoe UI Symbol",
+          "Segoe UI Symbol",
+          "Segoe UI Symbol",
+          "Segoe UI Symbol",
+          "Segoe UI Symbol",
+          "Segoe UI Symbol",
+          "Segoe UI Symbol",
+          "Segoe UI Symbol",
+          "Segoe UI Symbol",
+          "Segoe UI Symbol",
+          "Segoe UI Symbol",
+          "Segoe UI Symbol",
+          "Segoe UI Symbol",
+          "Segoe UI Symbol",
+          "Segoe UI Symbol",
+          "Segoe UI Symbol",
+          "Segoe UI Symbol",
+          "SimSun",
+          "Sitka",
+          "Sylfaen",
+          "Symbol",
+          "Webdings",
+          "Wingdings",
+          "Yu Gothic"
+      ];
+
+      window.onload = () => {
+        const text = document.getElementById("drifty");
+        
+        const changeFont = () => {
+          text.style.fontFamily = fonts[Math.floor(fonts.length * Math.random())];
+
+          setTimeout(changeFont, Math.floor(Math.random() * 400) + 300);
+        }
+        
+        changeFont();
+      }
+    </script>
+
+    <style>
+      body {
+        color: #ccc;
+        background: #111;
+        font-family: sans-serif;
+        overflow: hidden;
+      }
+
+      h1,
+      h2 {
+        margin: 0;
+      }
+
+      a {
+        color: #ccc;
+      }
+
+      .hero {
+        font-size: 20vw;
+        line-height: 1;
+        display: inline-block;
+        color: #fff;
+        z-index: 2;
+        letter-spacing: 10px;
+      }
+
+      .demo {
+        background: #fff;
+        overflow: hidden;
+      }
+
+      .layers {
+        position: relative;
+      }
+
+      .layers::before,
+      .layers::after {
+        content: attr(data-text);
+        position: absolute;
+        width: 110%;
+        z-index: -1;
+      }
+
+      .layers::before {
+        top: 10px;
+        left: 15px;
+        color: #FF0000;
+      }
+
+      .layers::after {
+        top: 5px;
+        left: -10px;
+        color: #0000FF;
+      }
+
+      .single-path {
+        clip-path: polygon(
+          0% 12%,
+          53% 12%,
+          53% 26%,
+          25% 26%,
+          25% 86%,
+          31% 86%,
+          31% 0%,
+          53% 0%,
+          53% 84%,
+          92% 84%,
+          92% 82%,
+          70% 82%,
+          70% 29%,
+          78% 29%,
+          78% 65%,
+          69% 65%,
+          69% 66%,
+          77% 66%,
+          77% 45%,
+          85% 45%,
+          85% 26%,
+          97% 26%,
+          97% 28%,
+          84% 28%,
+          84% 34%,
+          54% 34%,
+          54% 89%,
+          30% 89%,
+          30% 58%,
+          83% 58%,
+          83% 5%,
+          68% 5%,
+          68% 36%,
+          62% 36%,
+          62% 1%,
+          12% 1%,
+          12% 34%,
+          60% 34%,
+          60% 57%,
+          98% 57%,
+          98% 83%,
+          1% 83%,
+          1% 53%,
+          91% 53%,
+          91% 84%,
+          8% 84%,
+          8% 83%,
+          4% 83%
+        );
+      }
+
+      .paths {
+        animation: paths 5s step-end infinite;
+      }
+
+      @keyframes paths {
+        0% {
+          clip-path: polygon(
+            0% 43%,
+            83% 43%,
+            83% 22%,
+            23% 22%,
+            23% 24%,
+            91% 24%,
+            91% 26%,
+            18% 26%,
+            18% 83%,
+            29% 83%,
+            29% 17%,
+            41% 17%,
+            41% 39%,
+            18% 39%,
+            18% 82%,
+            54% 82%,
+            54% 88%,
+            19% 88%,
+            19% 4%,
+            39% 4%,
+            39% 14%,
+            76% 14%,
+            76% 52%,
+            23% 52%,
+            23% 35%,
+            19% 35%,
+            19% 8%,
+            36% 8%,
+            36% 31%,
+            73% 31%,
+            73% 16%,
+            1% 16%,
+            1% 56%,
+            50% 56%,
+            50% 8%
+          );
+        }
+
+        5% {
+          clip-path: polygon(
+            0% 29%,
+            44% 29%,
+            44% 83%,
+            94% 83%,
+            94% 56%,
+            11% 56%,
+            11% 64%,
+            94% 64%,
+            94% 70%,
+            88% 70%,
+            88% 32%,
+            18% 32%,
+            18% 96%,
+            10% 96%,
+            10% 62%,
+            9% 62%,
+            9% 84%,
+            68% 84%,
+            68% 50%,
+            52% 50%,
+            52% 55%,
+            35% 55%,
+            35% 87%,
+            25% 87%,
+            25% 39%,
+            15% 39%,
+            15% 88%,
+            52% 88%
+          );
+        }
+
+        30% {
+          clip-path: polygon(
+            0% 53%,
+            93% 53%,
+            93% 62%,
+            68% 62%,
+            68% 37%,
+            97% 37%,
+            97% 89%,
+            13% 89%,
+            13% 45%,
+            51% 45%,
+            51% 88%,
+            17% 88%,
+            17% 54%,
+            81% 54%,
+            81% 75%,
+            79% 75%,
+            79% 76%,
+            38% 76%,
+            38% 28%,
+            61% 28%,
+            61% 12%,
+            55% 12%,
+            55% 62%,
+            68% 62%,
+            68% 51%,
+            0% 51%,
+            0% 92%,
+            63% 92%,
+            63% 4%,
+            65% 4%
+          );
+        }
+
+        45% {
+          clip-path: polygon(
+            0% 33%,
+            2% 33%,
+            2% 69%,
+            58% 69%,
+            58% 94%,
+            55% 94%,
+            55% 25%,
+            33% 25%,
+            33% 85%,
+            16% 85%,
+            16% 19%,
+            5% 19%,
+            5% 20%,
+            79% 20%,
+            79% 96%,
+            93% 96%,
+            93% 50%,
+            5% 50%,
+            5% 74%,
+            55% 74%,
+            55% 57%,
+            96% 57%,
+            96% 59%,
+            87% 59%,
+            87% 65%,
+            82% 65%,
+            82% 39%,
+            63% 39%,
+            63% 92%,
+            4% 92%,
+            4% 36%,
+            24% 36%,
+            24% 70%,
+            1% 70%,
+            1% 43%,
+            15% 43%,
+            15% 28%,
+            23% 28%,
+            23% 71%,
+            90% 71%,
+            90% 86%,
+            97% 86%,
+            97% 1%,
+            60% 1%,
+            60% 67%,
+            71% 67%,
+            71% 91%,
+            17% 91%,
+            17% 14%,
+            39% 14%,
+            39% 30%,
+            58% 30%,
+            58% 11%,
+            52% 11%,
+            52% 83%,
+            68% 83%
+          );
+        }
+
+        76% {
+          clip-path: polygon(
+            0% 26%,
+            15% 26%,
+            15% 73%,
+            72% 73%,
+            72% 70%,
+            77% 70%,
+            77% 75%,
+            8% 75%,
+            8% 42%,
+            4% 42%,
+            4% 61%,
+            17% 61%,
+            17% 12%,
+            26% 12%,
+            26% 63%,
+            73% 63%,
+            73% 43%,
+            90% 43%,
+            90% 67%,
+            50% 67%,
+            50% 41%,
+            42% 41%,
+            42% 46%,
+            50% 46%,
+            50% 84%,
+            96% 84%,
+            96% 78%,
+            49% 78%,
+            49% 25%,
+            63% 25%,
+            63% 14%
+          );
+        }
+
+        90% {
+          clip-path: polygon(
+            0% 41%,
+            13% 41%,
+            13% 6%,
+            87% 6%,
+            87% 93%,
+            10% 93%,
+            10% 13%,
+            89% 13%,
+            89% 6%,
+            3% 6%,
+            3% 8%,
+            16% 8%,
+            16% 79%,
+            0% 79%,
+            0% 99%,
+            92% 99%,
+            92% 90%,
+            5% 90%,
+            5% 60%,
+            0% 60%,
+            0% 48%,
+            89% 48%,
+            89% 13%,
+            80% 13%,
+            80% 43%,
+            95% 43%,
+            95% 19%,
+            80% 19%,
+            80% 85%,
+            38% 85%,
+            38% 62%
+          );
+        }
+
+        1%,
+        7%,
+        33%,
+        47%,
+        78%,
+        93% {
+          clip-path: none;
+        }
+      }
+
+      .movement {
+        /* Normally this position would be absolute & on the layers, set to relative here so we can see it on the div */
+        position: relative;
+        animation: movement 8s step-end infinite;
+      }
+
+      @keyframes movement {
+        0% {
+          top: 0px;
+          left: -40px;
+        }
+
+        15% {
+          top: 20px;
+          left: 20px;
+        }
+
+        60% {
+          top: 10px;
+          left: -20px;
+        }
+
+        75% {
+          top: -10px;
+          left: 40px;
+        }
+
+        100% {
+          top: 20px;
+          left: 10px;
+        }
+      }
+
+      .opacity {
+        animation: opacity 7s step-end infinite;
+      }
+
+      @keyframes opacity {
+        0% {
+          opacity: 0;
+        }
+
+        7% {
+          opacity: 0;
+        }
+
+        7.01% {
+          opacity: 1;
+        }
+
+        8% {
+          opacity: 1;
+        }
+
+        8.01% {
+          opacity: 0;
+        }
+
+        13% {
+          opacity: 0;
+        }
+
+        13.01% {
+          opacity: 1;
+        }
+
+        13.2% {
+          opacity: 1;
+        }
+
+        13.21% {
+          opacity: 0;
+        }
+
+
+        17% {
+          opacity: 0;
+        }
+
+        17.01% {
+          opacity: 1;
+        }
+
+        17.8% {
+          opacity: 1;
+        }
+
+        17.81% {
+          opacity: 0;
+        }
+
+        23% {
+          opacity: 0;
+        }
+
+        23.01% {
+          opacity: 1;
+        }
+
+        23.3% {
+          opacity: 1;
+        }
+
+        23.31% {
+          opacity: 0;
+        }
+
+        37% {
+          opacity: 0;
+        }
+
+        37.01% {
+          opacity: 1;
+        }
+
+        37.4% {
+          opacity: 1;
+        }
+
+        37.41% {
+          opacity: 0;
+        }
+
+        
+        53% {
+          opacity: 0;
+        }
+
+        53.01% {
+          opacity: 1;
+        }
+
+        53.2% {
+          opacity: 1;
+        }
+
+        53.21% {
+          opacity: 0;
+        }
+
+        61% {
+          opacity: 0;
+        }
+
+        61.01% {
+          opacity: 1;
+        }
+
+        61.1% {
+          opacity: 1;
+        }
+
+        61.11% {
+          opacity: 0;
+        }
+
+        73% {
+          opacity: 0;
+        }
+
+        73.01% {
+          opacity: 1;
+        }
+
+        73.8% {
+          opacity: 1;
+        }
+
+        73.81% {
+          opacity: 0;
+        }
+
+        91% {
+          opacity: 0;
+        }
+
+        91.01% {
+          opacity: 1;
+        }
+
+        91.4% {
+          opacity: 1;
+        }
+
+        91.41% {
+          opacity: 0;
+        }
+      }
+
+      .font {
+        animation: font 10s step-end infinite;
+      }
+
+      @keyframes font {
+        0% {
+          color: #FF0000;
+        }
+
+        25% {
+          color: #FF0000;
+        }
+
+        25.01% {
+          color: #00FF00;
+        }
+
+        50% {
+          color: #00FF00;
+        }
+
+        50.01% {
+          color: #0000FF
+        }
+
+        75% {
+          color: #0000FF;
+        }
+
+        75.01% {
+          color: white
+        }
+
+        100% {
+          color: white;
+        }
+      }
+
+      .glitch span {
+        animation: paths 5s step-end infinite;
+      }
+
+      .glitch::before {
+        animation: paths 5s step-end infinite, opacity 5s step-end infinite,
+          font 8s step-end infinite, movement 10s step-end infinite;
+      }
+
+      .glitch::after {
+        animation: paths 5s step-end infinite, opacity 5s step-end infinite,
+          font 7s step-end infinite, movement 8s step-end infinite;
+      }
+
+      .hero-container {
+        position: relative;
+        padding: 200px 0;
+        text-align: center;
+      }
+
+      .hero {
+        animation: cray 6s infinite steps(50), drag 5s infinite;
+      }
+
+      @keyframes cray {
+        2% {
+          font-weight: 300;
+          font-style: italic;
+          text-decoration: none;
+          text-transform: none;
+        }
+        4% {
+          font-weight: 400;
+          font-style: normal;
+          text-decoration: none;
+          text-transform: none;
+        }
+        6% {
+          font-weight: 100;
+          font-style: normal;
+          text-decoration: none;
+          text-transform: none;
+        }
+        8% {
+          font-weight: 500;
+          font-style: normal;
+          text-decoration: none;
+          text-transform: none;
+        }
+        10% {
+          font-weight: 200;
+          font-style: normal;
+          text-decoration: underline;
+          text-transform: none;
+        }
+        12% {
+          font-weight: 600;
+          font-style: normal;
+          text-decoration: none;
+          text-transform: none;
+        }
+        14% {
+          font-weight: 300;
+          font-style: italic;
+          text-decoration: none;
+          text-transform: none;
+        }
+        16% {
+          font-weight: 600;
+          font-style: normal;
+          text-decoration: none;
+          text-transform: none;
+        }
+        18% {
+          font-weight: 600;
+          font-style: normal;
+          text-decoration: none;
+          text-transform: none;
+        }
+        20% {
+          font-weight: 200;
+          font-style: normal;
+          text-decoration: line-through;
+          text-transform: none;
+        }
+        22% {
+          font-weight: 600;
+          font-style: normal;
+          text-decoration: none;
+          text-transform: none;
+        }
+        24% {
+          font-weight: 100;
+          font-style: normal;
+          text-decoration: none;
+          text-transform: none;
+        }
+        26% {
+          font-weight: 600;
+          font-style: normal;
+          text-decoration: none;
+          text-transform: none;
+        }
+        28% {
+          font-weight: 500;
+          font-style: italic;
+          text-decoration: none;
+          text-transform: none;
+        }
+        30% {
+          font-weight: 500;
+          font-style: italic;
+          text-decoration: underline;
+          text-transform: none;
+        }
+        32% {
+          font-weight: 300;
+          font-style: normal;
+          text-decoration: none;
+          text-transform: none;
+        }
+        34% {
+          font-weight: 300;
+          font-style: normal;
+          text-decoration: none;
+          text-transform: none;
+        }
+        36% {
+          font-weight: 300;
+          font-style: italic;
+          text-decoration: none;
+          text-transform: none;
+        }
+        38% {
+          font-weight: 500;
+          font-style: normal;
+          text-decoration: none;
+          text-transform: none;
+        }
+        40% {
+          font-weight: 200;
+          font-style: normal;
+          text-decoration: none;
+          text-transform: none;
+        }
+        42% {
+          font-weight: 600;
+          font-style: normal;
+          text-decoration: none;
+          text-transform: none;
+        }
+        44% {
+          font-weight: 100;
+          font-style: normal;
+          text-decoration: none;
+          text-transform: none;
+        }
+        46% {
+          font-weight: 300;
+          font-style: italic;
+          text-decoration: none;
+          text-transform: none;
+        }
+        48% {
+          font-weight: 500;
+          font-style: normal;
+          text-decoration: line-through;
+          text-transform: none;
+        }
+        50% {
+          font-weight: 400;
+          font-style: normal;
+          text-decoration: line-through;
+          text-transform: none;
+        }
+        52% {
+          font-weight: 600;
+          font-style: normal;
+          text-decoration: none;
+          text-transform: none;
+        }
+        54% {
+          font-weight: 700;
+          font-style: italic;
+          text-decoration: none;
+          text-transform: none;
+        }
+        56% {
+          font-weight: 300;
+          font-style: normal;
+          text-decoration: none;
+          text-transform: none;
+        }
+        58% {
+          font-weight: 500;
+          font-style: normal;
+          text-decoration: line-through;
+          text-transform: none;
+        }
+        60% {
+          font-weight: 500;
+          font-style: italic;
+          text-decoration: none;
+          text-transform: none;
+        }
+        62% {
+          font-weight: 200;
+          font-style: normal;
+          text-decoration: line-through;
+          text-transform: none;
+        }
+        64% {
+          font-weight: 500;
+          font-style: normal;
+          text-decoration: none;
+          text-transform: none;
+        }
+        66% {
+          font-weight: 100;
+          font-style: normal;
+          text-decoration: underline;
+          text-transform: none;
+        }
+        68% {
+          font-weight: 600;
+          font-style: normal;
+          text-decoration: none;
+          text-transform: none;
+        }
+        70% {
+          font-weight: 100;
+          font-style: normal;
+          text-decoration: none;
+          text-transform: uppercase;
+        }
+        72% {
+          font-weight: 100;
+          font-style: italic;
+          text-decoration: none;
+          text-transform: none;
+        }
+        74% {
+          font-weight: 600;
+          font-style: normal;
+          text-decoration: underline;
+          text-transform: none;
+        }
+        76% {
+          font-weight: 600;
+          font-style: normal;
+          text-decoration: none;
+          text-transform: none;
+        }
+        78% {
+          font-weight: 600;
+          font-style: normal;
+          text-decoration: line-through;
+          text-transform: none;
+        }
+        80% {
+          font-weight: 600;
+          font-style: normal;
+          text-decoration: none;
+          text-transform: none;
+        }
+        82% {
+          font-weight: 500;
+          font-style: italic;
+          text-decoration: underline;
+          text-transform: none;
+        }
+        84% {
+          font-weight: 400;
+          font-style: normal;
+          text-decoration: none;
+          text-transform: none;
+        }
+        86% {
+          font-weight: 400;
+          font-style: normal;
+          text-decoration: none;
+          text-transform: none;
+        }
+        88% {
+          font-weight: 700;
+          font-style: normal;
+          text-decoration: underline;
+          text-transform: none;
+        }
+        90% {
+          font-weight: 600;
+          font-style: italic;
+          text-decoration: none;
+          text-transform: none;
+        }
+        92% {
+          font-weight: 600;
+          font-style: normal;
+          text-decoration: none;
+          text-transform: none;
+        }
+        94% {
+          font-weight: 500;
+          font-style: normal;
+          text-decoration: none;
+          text-transform: none;
+        }
+        96% {
+          font-weight: 400;
+          font-style: italic;
+          text-decoration: none;
+          text-transform: none;
+        }
+        98% {
+          font-weight: 300;
+          font-style: italic;
+          text-decoration: line-through;
+          text-transform: none;
+        }
+      }
+
+      /* NOISE */
+      .lines {
+        position: fixed;
+        left: 0;
+        top: 0;
+        width: 100vw;
+        height: 100vh;
+        pointer-events: none;
+        z-index: 300;
+        opacity: 0.6;
+      }
+
+      .lines:before {
+        content: '';
+        position: absolute;
+        left: 0;
+        top: 0;
+        right: 0;
+        bottom: 0;
+        pointer-events: none;
+        background: linear-gradient(to bottom, transparent 50%, rgba(0, 0, 0, .5) 51%);
+        background-size: 100% 4px;
+        will-change: background, background-size;
+        animation: scanlines 0.2s linear infinite;
+      }
+
+      @keyframes noise {
+        0%,
+        100% {
+          background-position: 0 0;
+        }
+        10% {
+          background-position: -5% -10%;
+        }
+        20% {
+          background-position: -15% 5%;
+        }
+        30% {
+          background-position: 7% -25%;
+        }
+        40% {
+          background-position: 20% 25%;
+        }
+        50% {
+          background-position: -25% 10%;
+        }
+        60% {
+          background-position: 15% 5%;
+        }
+        70% {
+          background-position: 0 15%;
+        }
+        80% {
+          background-position: 25% 35%;
+        }
+        90% {
+          background-position: -10% 10%;
+        }
+      }
+
+      @keyframes scanlines {
+        from {
+          background: linear-gradient(to bottom, transparent 50%, rgba(0, 0, 0, .5) 51%);
+          background-size: 100% 4px;
+        }
+        to {
+          background: linear-gradient(to bottom, rgba(0, 0, 0, .5) 50%, transparent 51%);
+          background-size: 100% 4px;
+        }
+      }
+
+      @keyframes drag {
+        0% {
+          top: 0;
+          left: 0;
+        }
+
+        1% {
+          top: 0;
+          left: 0;
+        }
+
+        1.01% {
+          top: 170px;
+          left: -200px;
+        }
+        
+        2.5% {
+          top: 170px;
+          left: -200px;
+        }
+
+        2.51% {
+          top: 0;
+          left: 0;
+        }
+
+        2.52% {
+          top: -200px;
+          left: 300px
+        }
+
+        4% {
+          top: -200px;
+          left: 300px  
+        }
+
+        4.01% {
+          top: 0;
+          left: 0;
+        }
+      }
+    </style>
+  </head>
+
+  <body class="flex flex-col items-center justify-center w-[100vw] h-[100dvh]">
+    <div class="lines"></div>
+    <div class="hero-container">
+      <h2 id="drifty" class="hero glitch layers" data-text="drifty"><span>drifty</span></h2>
+    </div>
+  </body>
+</html>

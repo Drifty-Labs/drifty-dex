@@ -1,0 +1,5 @@
+[dependencies]
+base = "https://github.com/dfinity/new-motoko-base"
+
+[dev-dependencies]
+test = "2.1.1"
