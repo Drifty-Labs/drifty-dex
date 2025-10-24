@@ -67,4 +67,4 @@ In essence, Drifty is not just another DEX; it's a foundational shift in how liq
 
 ---
 
-Ask questions and leave feedback via our [Telegram group](t.me/driftyicp).
+Ask questions and leave feedback via our [Telegram group](https://t.me/driftyicp).
