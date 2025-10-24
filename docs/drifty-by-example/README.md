@@ -26,6 +26,7 @@ Drifty achieves this by blending concepts from modern CeDeFi and tailoring them 
 -   **Limit Orders**: Buy and sell tokens at specific, predetermined prices.
 -   **Infinite Scalability**: Supports pools that can handle billions of liquidity positions and limit orders simultaneously.
 -   **Resilience**: Performs reliably during market manipulation and sharp price swings.
+-   **Revenue Sharing**: Stake **$BURN** and provide liquidity in specific pools to earn 100% of the Drifty's fee revenue from almost all other pools.
 
 ## How to Read This Series
 
@@ -35,7 +36,7 @@ The articles in this series are intended to be read in sequence, as earlier entr
 
 -   [Ep. 1 — Why Drifty?](./ep1-why-drifty.md)
 -   [Ep. 2 — The Liquidity Pool Lifecycle](./ep2-liquidity-pool-lifecycle.md)
--   (comming soon) [Ep. 3 — Active Impermanent Loss Recovery]()
+-   (comming soon) [Ep. 3 — Impermanent Loss Recovery]()
 
 ---
 

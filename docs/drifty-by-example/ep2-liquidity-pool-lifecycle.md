@@ -97,45 +97,13 @@ These new allocations make the liquidity thicker and deeper, resulting in less s
 
 ### IL Recovery
 
-The scenario described so far is a realistic one that will occur frequently. But it's only the beginning. Let's see how this situation typically resolves.
-
-Now, let's assume a series of BBB -> AAA trades occur (perhaps traders believe AAA is overvalued relative to BBB). The first key moment is when the price returns to its starting point:
-
-![Fig. 11 - Price Reset. Similar to Fig. 10, but P2 transformed back into P0, which is at the left edge of all allocated liquidity. All liquidity is turned green, representing it was all consumed by incoming trades.](./imgs/ep2/11.png)
-
-This price movement triggers the natural recovery of the BBB AMM's impermanent loss. The locked AAA is converted back into BBB, which can be returned to the reserve for later use:
-
-![Fig. 12 - Natural IL Recovery. Same as Fig. 11, but ticks (not layers) are now semi-transparent, representing them returning to the BBB reserve. At the same time, AAA's layers are now considered IL, because they are transformed into BBB](./imgs/ep2/12.png)
-
-However, the timer-allocated liquidity from the AAA AMM now becomes Impermanent Loss.
-
-As BBB -> AAA trades continue, we arrive at the following situation:
-
-![Fig. 13 - New price discovery. P0 lowers to the new level named P3, where new on demand liquidity is allocated by AAA AMM.](./imgs/ep2/13.png)
-
-Since no liquidity was allocated at these price ticks, the on-demand logarithmic rule is triggered, this time for the AAA AMM. The rule functions exactly as it did for the BBB AMM.
-
-Let's assume trading pauses for a while:
-
-![Fig. 14 - On timer BBB allocation. Same as before, but now BBB allocates on timer liquidity below AAA's impermanent loss.](./imgs/ep2/14.png)
-
-Now, with the AAA AMM being the only one with IL, the BBB AMM begins to allocate timer-based liquidity. The situation is a mirror image of what we saw before, with the AMMs having swapped roles.
-
-After some time, as is common in markets, a correction occurs. A wave of AAA -> BBB trades pushes the price back towards P0 and further:
-
-![Fig. 15 - Price correction. Same as in Fig. 14, but P3 becomes P4, which is even higher than P0 was, which means that AAA's IL created from on demand allocations is completely resolved, but its earlier IL from on timer allocations is only partially resolved. BBB's on timer allocations partially become IL as well](./imgs/ep2/15.png)
-
-This resolves some of the impermanent loss, but it also creates a situation where **both** AMMs now have some IL:
-
-![Fig. 16 - IL Recovery Start. ](./imgs/ep2/16.png)
-
-The scenario has come full circle. Initially, there was no IL, and the price was oscillating as the AMMs worked to discover it. Now, the price is oscillating within the impermanent loss ranges of both AMMs. In Drifty, this signals that the price discovery phase is likely over and the price will now stabilize somewhere between these two IL zones. This is when the active IL Recovery phase begins for the pool.
+The scenario described so far is a realistic one that will occur frequently. But it's only the beginning. Typically the situation evolves into something much more complex, with both AMMs having IL simultaneously, without an easy and natural way out of it.
 
 How exactly is this impermanent loss recovered? Find out in the next episode!
 
 #### Read Next
 
-(comming soon) [Ep. 3 — Active Impermanent Loss Recovery]()
+(comming soon) [Ep. 3 — Impermanent Loss Recovery]()
 
 ---
 
