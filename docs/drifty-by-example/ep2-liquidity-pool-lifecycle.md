@@ -107,4 +107,4 @@ How exactly is this impermanent loss recovered? Find out in the next episode!
 
 ---
 
-Ask questions and leave feedback via our [Telegram group](https://t.me/homeofmsq).
+Ask questions and leave feedback via our [Telegram group](t.me/driftyicp).
