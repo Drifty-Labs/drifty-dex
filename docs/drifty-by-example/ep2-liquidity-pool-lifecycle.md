@@ -103,7 +103,7 @@ How exactly is this impermanent loss recovered? Find out in the next episode!
 
 #### Read Next
 
-(comming soon) [Ep. 3 — Impermanent Loss Recovery]()
+[Ep. 3 — Impermanent Loss Recovery](./ep3-il-recovery.md)
 
 ---
 

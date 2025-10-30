@@ -36,7 +36,8 @@ The articles in this series are intended to be read in sequence, as earlier entr
 
 -   [Ep. 1 — Why Drifty?](./ep1-why-drifty.md)
 -   [Ep. 2 — The Liquidity Pool Lifecycle](./ep2-liquidity-pool-lifecycle.md)
--   (comming soon) [Ep. 3 — Impermanent Loss Recovery]()
+-   [Ep. 3 — Impermanent Loss Recovery](./ep3-il-recovery.md)
+-   (coming soon) [Ep. 4 — The LP Gateway]()
 
 ---
 
