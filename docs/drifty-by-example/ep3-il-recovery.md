@@ -118,6 +118,12 @@ This means that LP positions are effectively compounding. The profit they earn i
 
 So, impermanent loss isn't some permanent problem. In Drifty, it's just a temporary state. The system is designed to automatically work its way out of it, using the market's own energy to heal itself.
 
+### Infinite Scalability
+
+As was mentioned earlier, Drifty attempts to not only be efficient for the LPs, but also to be resilient to bad stuff that might happen. Scalability is a huge part of the resilience and thanks to **the Internet Computer**, Drifty is capable to scale infinitely, processing billions of trades, LP positions and limit orders simultaneously.
+
+Wanna find out how? Read the next episode about the LP Gateways!
+
 #### Read Next
 
 (coming soon) [Ep. 4 — The LP Gateway]()
@@ -135,7 +141,7 @@ Think of it like this: your reserve is your main stash of money (e.g., dollars) 
 
 <details>
 <summary>So, Drifty is basically a market-making robot?</summary>
-Yes, that's a great way to think about it! It automates a professional market-making strategy for everyone who provides liquidity. Instead of you having to manually place buy and sell orders, Drifty does it for you on a massive scale, with the goal of always making a small profit (the "spread") to increase your reserve.
+That’s a fairly valid statement, but Drifty is more than just that. It automates a professional market-making strategy for everyone who provides liquidity. Instead of manually placing buy and sell orders, Drifty does it for you on a large scale, aiming to consistently earn small profits (the “spread”) and grow your reserves.
 </details>
 
 <br/>
@@ -196,4 +202,4 @@ It's definitely a lot to take in! The key takeaway is that Impermanent Loss isn'
 
 <br/>
 
-If you have more questions, don't hesitate to ask in the [Telegram group](https://t.me/driftyicp).
+**If you have more questions, don't hesitate to ask in the [Telegram group](https://t.me/driftyicp).**

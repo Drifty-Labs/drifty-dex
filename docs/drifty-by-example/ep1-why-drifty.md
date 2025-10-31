@@ -134,4 +134,4 @@ ckTokens (Chain-Key tokens) are tokens from other blockchains, like Bitcoin (ckB
 
 <br/>
 
-If you have more questions, don't hesitate to ask in the [Telegram group](https://t.me/driftyicp).
+**If you have more questions, don't hesitate to ask in the [Telegram group](https://t.me/driftyicp).**

@@ -44,11 +44,7 @@ Continuing our example, let's say LPs have provided 1,000 units of each asset to
 
 ### IL Accumulation
 
-The reserves are spent gradually, with different rules for each AMM depending on the pool's condition. Let's continue our example: imagine a trader wants to swap 15 AAA for BBB.
-
-![Fig. 5 - Incoming Trade. Same as Fig. 4, but there is a small blue rectangle in the middle, representing an incoming AAA -> BBB trade containing 15 AAA.](./imgs/ep2/5.png)
-
-The allocation rule has two parts:
+The reserves are spent gradually, with different rules for each AMM depending on the pool's condition. The allocation rule has two parts:
 
 -   If an incoming trade requires more liquidity than is currently allocated in the direction of the trade, the responsible AMM allocates more ticks following a logarithmic rule.
 -   Every 10 minutes, each AMM allocates 1% of its remaining unallocated reserve liquidity in an even layer across the opposing AMM's impermanent loss ticks.
@@ -59,13 +55,7 @@ Essentially, liquidity is allocated in two ways: on demand or on a timer. In our
 2.  If this is enough to settle the trade, finish the allocation and settle it.
 3.  If not, double `S` (`S = S * 2`) and repeat from step 1.
 
-The trade would be settled as follows:
-
-![Fig. 6 - Incoming trade settled. Same as Fig. 5, but the small rectangle in the middle is now green and contains 6.66 BBB, representing a fully settled trade. BBB AMM now contains ~980 BBB, representing 1% being allocated from it twice (S = 2). The price plane now has 3 ticks: one tall and two twice smaller. The tall one is blue, representing that it is now fully transformed to AAA. The first small one is half blue half green, representing that it contains both assets. The second small one is all green. The current price now has a new value P1 = 3 - the price has increased during the settling of the trade.](./imgs/ep2/6.png)
-
-In our example, the BBB AMM allocated a total of three ticks. One was fully consumed, one was partially consumed, and the last was untouched. The trader received approximately `6.66 BBB` for their `15 AAA` (`10 / 2 + 5 / 3`).
-
-If more AAA -> BBB trades occurred, the algorithm would continue allocating 1% of the reserves in an even layer across an increasingly wider set of ticks. This logarithmic rule is essential for efficient price discovery, as it can cover the entire price plane in just 21 steps while spending only about 19% of the reserve. In other words, even if the price of BBB were to increase by a billion percent instantly, BBB LPs would still retain 80% of their initial deposits. In a standard Uniswap v1 pool, they would be left with less than 0.01% of their original BBB. This design ensures that impermanent loss is minimal, even after a massive price surge.
+If some AAA -> BBB trades occurred, the algorithm will be allocating 1% of the reserves in an even layer across an increasingly wider set of ticks. This logarithmic rule is essential for efficient price discovery, as it can cover the entire price plane in just 21 steps while spending only about 19% of the reserve. In other words, even if the price of BBB were to increase by a billion percent instantly, BBB LPs would still retain 80% of their initial deposits. In a standard Uniswap v1 pool, they would be left with less than 0.01% of their original BBB. This design ensures that impermanent loss is minimal, even after a massive price surge.
 
 ![Fig 7. - Scaled up illustration of the logarithmic rule. Similar to previous figures, but more abstract. Contains 15 ticks. The first one is tall. The second and third ones are twice lower. Ticks 4, 5, 6, 7 are 4 times lower than the first one. The remaining 8 ticks are 8 times lower than the first one. Same percentage of the allocated liquidity scattered across more and more ticks allow for essentially infinite liquidity.](./imgs/ep2/7.png)
 
@@ -73,7 +63,7 @@ If more AAA -> BBB trades occurred, the algorithm would continue allocating 1% o
 
 This on-demand allocation is most efficient in new pools where liquidity has not yet been allocated by the timer. However, it remains crucial for efficient price discovery. By minimizing the liquidity spent on price discovery, less value is extracted from LPs by arbitrage traders. Arbitrage is still possible, but it becomes constructive rather than wasteful.
 
-Let's re-examine the pool's state after several trades (assuming they all occurred within 10 minutes):
+Let's re-examine the pool's state after several AAA->BBB trades (assuming they all occurred within 10 minutes):
 
 ![Fig 8. - An illustration of impermanent loss. Scaled down version of figure 7, with new price level P2 in the middle of allocated ticks. Ticks to the left of P2 are all blue, ticks to the right of P2 are all green. Since all trades were AAA -> BBB, blue ticks now exclusively represent impermanent loss of the BBB AMM.](./imgs/ep2/8.png)
 
@@ -174,4 +164,4 @@ This is the "smart" part. The system sees where the other side has lost money (t
 
 <br/>
 
-If you have more questions, don't hesitate to ask in the [Telegram group](https://t.me/driftyicp).
+**If you have more questions, don't hesitate to ask in the [Telegram group](https://t.me/driftyicp).**
