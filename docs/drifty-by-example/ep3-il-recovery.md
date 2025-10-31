@@ -1,5 +1,7 @@
 # Drifty By Example | Ep. 3 — Impermanent Loss Recovery
 
+If you have questions after reading this document, please refer to the [FAQ section below](#faq).
+
 In the last episode, we saw our pool get its first taste of action. After a few trades, the BBB token AMM was left with some impermanent loss (IL).
 
 ![Fig. 1 - State of the pool at the end of Episode 2. Gray horizontal line with two arrows, representing the price plane (0;+infinity); intersected with a small but bold P2 price marker a little bit on the right. On the left of P2 are blue ticks of liquidity. On the right some green ticks of liqudity. Two cylinders on the sides (the blue one for base AAA on the left and the green one for quote BBB on the right) representing the AMM for each asset. Bot AMMs have ~960 tokens at their reserve.](./imgs/ep3/1.png)
@@ -122,4 +124,76 @@ So, impermanent loss isn't some permanent problem. In Drifty, it's just a tempor
 
 ---
 
-Ask questions and leave feedback via our [Telegram group](https://t.me/driftyicp).
+## FAQ
+
+<details>
+<summary>What's the difference between a "reserve" and an "inventory"?</summary>
+Think of it like this: your reserve is your main stash of money (e.g., dollars) that you want to grow. Your inventory is the stuff you buy (e.g., collectible cards) hoping to sell for a profit. In Drifty, an AMM's reserve is its main asset, and its inventory is the other asset it has acquired through trades, which it now needs to sell at a higher price. This "inventory" is the Impermanent Loss.
+</details>
+
+<br/>
+
+<details>
+<summary>So, Drifty is basically a market-making robot?</summary>
+Yes, that's a great way to think about it! It automates a professional market-making strategy for everyone who provides liquidity. Instead of you having to manually place buy and sell orders, Drifty does it for you on a massive scale, with the goal of always making a small profit (the "spread") to increase your reserve.
+</details>
+
+<br/>
+
+<details>
+<summary>What is a "black swan" event?</summary>
+A "black swan" is a term for a completely unexpected and rare event that has massive consequences. In crypto, this could be a sudden 50% price crash or a huge, unexpected surge. The article uses this as a stress test to show how Drifty is designed to handle extreme market volatility.
+</details>
+
+<br/>
+
+<details>
+<summary>What happens if the price moves so much that all the liquidity is used up?</summary>
+This is where Drifty's dual-AMM design is clever. If the price moves sharply in one direction, it might use up all of one AMM's liquidity (its reserve). However, that same price movement *recovers* the other AMM's inventory back into a usable reserve. So, no matter what, there is always one AMM with a full reserve ready to provide liquidity.
+</details>
+
+<br/>
+
+<details>
+<summary>How do "dynamic fees" help recover Impermanent Loss?</summary>
+When the market is volatile and prices are swinging wildly, Drifty automatically increases the trading fees. This means the pool earns more money during chaotic periods. This extra fee income is then used to "buy back" the AMM's inventory (the Impermanent Loss), converting it back into the reserve asset.
+</details>
+
+<br/>
+
+<details>
+<summary>What does it mean to buy back the "worst" IL ticks?</summary>
+The "worst" IL ticks are the ones at prices furthest away from the current market price. They represent the inventory that was bought at the most unfavorable time. The system uses the fees it earns to get rid of this "worst" inventory first, gradually cleaning up the Impermanent Loss.
+</details>
+
+<br/>
+
+<details>
+<summary>So the fees aren't paid out to me directly?</summary>
+Correct. Instead of just giving you the fee income, Drifty automatically reinvests it for you. It uses the fees to repair the Impermanent Loss in your position. Once the IL is recovered, the fees then work to grow your original deposit. This is how your position effectively compounds over time. You don't get the fees, but your position becomes bigger and bigger over time.
+</details>
+
+<br/>
+
+<details>
+<summary>What does it mean for liquidity to get "thicker and deeper"?</summary>
+As the system recovers IL, it takes that recovered liquidity and concentrates it around the current trading price. This means there are more tokens available right where the trading action is happening. For traders, this results in "thicker" liquidity, which means less slippage and better prices.
+</details>
+
+<br/>
+
+<details>
+<summary>Can I take my profits out?</summary>
+Yes. The article mentions that LPs are "free to cut a piece of their position whenever they want." As your position grows from the reinvested fees, you can withdraw a portion of it as profit while leaving the rest to continue working and earning for you.
+</details>
+
+<br/>
+
+<details>
+<summary>This is still pretty complex. Is there a simpler way to understand it?</summary>
+It's definitely a lot to take in! The key takeaway is that Impermanent Loss isn't a permanent problem in Drifty. The system is designed to use the market's own energy (volatility and trading fees) to automatically fix itself over time. 
+</details>
+
+<br/>
+
+If you have more questions, don't hesitate to ask in the [Telegram group](https://t.me/driftyicp).

@@ -1,5 +1,7 @@
 # Drifty By Example | Ep. 1 — Why Drifty?
 
+If you have questions after reading this document, please refer to the [FAQ section below](#faq).
+
 Let's explore _why_ Drifty represents a significant step forward in decentralized finance (DeFi), particularly in how it addresses long-standing challenges for liquidity providers, traders, and token projects.
 
 ## The Liquidity Challenge in Traditional DEXs
@@ -67,4 +69,69 @@ In essence, Drifty is not just another DEX; it's a foundational shift in how liq
 
 ---
 
-Ask questions and leave feedback via our [Telegram group](https://t.me/driftyicp).
+## FAQ
+
+<details>
+<summary>What is "Impermanent Loss"? It sounds scary.</summary>
+Impermanent Loss (IL) is a risk you take when you provide tokens to a liquidity pool. If the price of the token you deposited goes up a lot, you can end up with less money than if you had just held onto the token in your wallet. Drifty is designed to help you get that value back over time.
+</details>
+
+<br/>
+
+<details>
+<summary>So, if I put my tokens in Drifty, I won't lose money if the price goes up?</summary>
+That's the goal. Drifty has a system to "recover" the value you would have lost from Impermanent Loss. It might take some time, but the aim is to make sure you profit from a price increase, similar to how you would if you just held the tokens.
+</details>
+
+<br/>
+
+<details>
+<summary>What does it mean to "provide liquidity"?</summary>
+Providing liquidity means you are lending your tokens to a decentralized exchange (like Drifty) so that other people can trade with them. In return, you earn a small fee from every trade that happens in that pool.
+</details>
+
+<br/>
+
+<details>
+<summary>Why would a project's own community members be hesitant to provide liquidity?</summary>
+Because of Impermanent Loss. If they believe in a project, they expect its token price to rise. In traditional exchanges, this price rise would cause them to lose some of their tokens, which feels like a penalty for supporting the project. Drifty aims to fix this.
+</details>
+
+<br/>
+
+<details>
+<summary>How is Drifty different from other platforms that try to solve Impermanent Loss?</summary>
+Many other platforms use complex strategies or give you extra reward tokens to cover your losses. Drifty's approach is built into its core design. It doesn't need to pay you with extra tokens; instead, it manages the trading process in a way that naturally helps you recover from IL.
+</details>
+
+<br/>
+
+<details>
+<summary>What does "single-sided liquidity" mean?</summary>
+In many exchanges, you have to deposit a pair of tokens (like ETH and USDC) in equal value. In Drifty, you can provide just one of the tokens in a pair. For example, you can provide only your project's token without needing to also provide a stablecoin.
+</details>
+
+<br/>
+
+<details>
+<summary>What are "dynamic fees"?</summary>
+The trading fees on Drifty change based on market conditions. When there's a lot of trading and price movement (volatility), the fees go up, which means liquidity providers earn more. When the market is calm, fees are lower to encourage more trading.
+</details>
+
+<br/>
+
+<details>
+<summary>What is the Internet Computer (IC)? Why is Drifty built on it?</summary>
+The Internet Computer is a type of blockchain that is very fast, scalable and has special features like timers, reverse gas model and secure randomness. Drifty's unique design requires those special features.
+</details>
+
+<br/>
+
+<details>
+<summary>What are "ckTokens"?</summary>
+ckTokens (Chain-Key tokens) are tokens from other blockchains, like Bitcoin (ckBTC) or Ethereum (ckETH), that have been "bridged" or brought over to the Internet Computer. Drifty makes it easier and cheaper to trade these tokens on the IC.
+</details>
+
+<br/>
+
+If you have more questions, don't hesitate to ask in the [Telegram group](https://t.me/driftyicp).

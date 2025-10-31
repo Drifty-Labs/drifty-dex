@@ -1,5 +1,7 @@
 # Drifty By Example | Ep. 2 — The Liquidity Pool Lifecycle
 
+If you have questions after reading this document, please refer to the [FAQ section below](#faq).
+
 In Drifty, a liquidity pool is similar to those in other Decentralized Exchanges (DEXs). It's an isolated market where traders can exchange one asset for another within a specific trading pair.
 
 Liquidity Providers (LPs) deposit assets into the pool, and traders use this liquidity to swap their own assets. In return for this service, traders pay a small fee with each trade. These fees are distributed to LPs proportional to their share of the total liquidity — the more you contribute, the more you earn.
@@ -107,4 +109,69 @@ How exactly is this impermanent loss recovered? Find out in the next episode!
 
 ---
 
-Ask questions and leave feedback via our [Telegram group](https://t.me/driftyicp).
+## FAQ
+
+<details>
+<summary>What is a "liquidity pool"?</summary>
+Think of it like a big pot of two different types of tokens (e.g., Token A and Token B). People who want to trade Token A for Token B can dip into this pot. People who add their tokens to the pot are called "Liquidity Providers" (LPs), and they earn fees from the traders.
+</details>
+
+<br/>
+
+<details>
+<summary>What does "single-sided liquidity" mean again?</summary>
+It means you don't have to provide both tokens to the "pot." You can choose to provide only Token A or only Token B. This is simpler than many other exchanges where you must provide an equal value of both.
+</details>
+
+<br/>
+
+<details>
+<summary>What are "base" and "quote" tokens?</summary>
+It's just a way to define the price. If a trading pair is AAA/BBB, the "base" is AAA and the "quote" is BBB. The price is then expressed as "how many BBB tokens do I get for one AAA token?"
+</details>
+
+<br/>
+
+<details>
+<summary>What are "ticks"? The article mentions Uniswap V3.</summary>
+You can think of ticks as specific price points. Instead of the price changing smoothly, it moves from one tick to the next. Drifty uses a simplified version of this idea, where the price stays constant across a single tick, like in a traditional stock market order book.
+</details>
+
+<br/>
+
+<details>
+<summary>What is a "reserve"?</summary>
+When you provide liquidity (your tokens) to a Drifty pool, they aren't immediately put to work. They are held in a "reserve" for that specific token's AMM (Automated Market Maker). The system then gradually allocates this liquidity from the reserve as needed.
+</details>
+
+<br/>
+
+<details>
+<summary>How is liquidity "allocated"? The article mentions "on demand" and "on a timer."</summary>
+"On demand" means when a trade comes in, the system allocates just enough liquidity from the reserve to complete that trade. "On a timer" means that roughly every 10 minutes, the system automatically allocates a small percentage of the remaining reserve to make the trading pool deeper and more efficient for future trades.
+</details>
+
+<br/>
+
+<details>
+<summary>The article says LPs would retain 80% of their deposit even if the price goes up a billion percent. How is that possible?</summary>
+This is thanks to the "logarithmic rule" for allocating liquidity. Instead of spreading liquidity evenly, it allocates it in increasingly larger price steps. This means it can cover a massive price range while only using a small fraction of the total reserve, protecting LPs from huge losses due to Impermanent Loss.
+</details>
+
+<br/>
+
+<details>
+<summary>What does it mean that the pool can "calculate the impermanent loss for each AMM"?</summary>
+Because Drifty separates the liquidity for each token into two different AMMs (one for Token A, one for Token B), it can track the performance of each one independently. It knows exactly how much "Impermanent Loss" the Token A providers have versus the Token B providers. This "self-awareness" allows the pool to make smart decisions to help LPs recover.
+</details>
+
+<br/>
+
+<details>
+<summary>Why does the system allocate liquidity over the "opposing AMM's impermanent loss ticks"?</summary>
+This is the "smart" part. The system sees where the other side has lost money (the IL ticks) and assumes that the price might trade in that area again. By adding liquidity there, it makes the pool more efficient right where trades are most likely to happen, which helps generate more fees and recover the loss faster.
+</details>
+
+<br/>
+
+If you have more questions, don't hesitate to ask in the [Telegram group](https://t.me/driftyicp).
