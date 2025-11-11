@@ -1,77 +1,114 @@
-import { AMMStats } from "./utils.ts";
+// TODO: instead of inverting the price for AMMs, let's just invert ticks
+// TODO: price inside an AMM is defined as "how much reserve for 1 unit of inventory"
+// TODO: meaning that we draw reserve from right to the left
+
+import { CurrentTick } from "./cur-tick.ts";
+import { Inventory, Reserve } from "./liquidity.ts";
+import { TickIndex, TickIndexFactory } from "./ticks.ts";
+import { panic } from "./utils.ts";
+
+export type DepositArgs = {
+    reserve: number;
+};
+
+export type WithdrawArgs = {
+    depositedReserve: number;
+};
+
+export type WithdrawResult = {
+    reserve: number;
+    inventory: number;
+};
 
 export class AMM {
-    private totalReserve: number = 0;
-    private unallocatedReserve: number = 0;
-    private allocatedReserve: number = 0;
-    private totalInventory: number = 0;
+    private depositedReserve: number = 0;
+    private fees: number = 0;
+    private reserve: Reserve = new Reserve();
+    private inventory: Inventory = new Inventory();
+    private currentTick: CurrentTick | undefined = undefined;
+    private initted: boolean = false;
 
-    public expose(reserve: number, inventory: number) {
-        this.allocatedReserve -= reserve;
-        this.totalInventory += inventory;
+    public init(reserve: number, curTickIdx: number) {
+        this.assertNotInitted();
+
+        this.reserve.init(
+            reserve,
+            this.tickIndexFactory.min(),
+            this.tickIndexFactory.make(curTickIdx)
+        );
     }
 
-    public recover(reserve: number, inventory: number) {
-        this.allocatedReserve += reserve;
-        this.totalInventory -= inventory;
+    public deposit(args: DepositArgs): void {
+        if (this.currentTick === undefined) {
+            this.reserve.put(args.reserve);
+            return;
+        }
+
+        const width = this.reserve.width + 1;
+        const addToReserve = (args.reserve * this.reserve.width) / width;
+        const addToCurTick = args.reserve - addToReserve;
+
+        this.reserve.put(addToReserve);
+        this.currentTick.deposit(addToCurTick);
     }
 
-    public deallocate(qty: number) {
-        this.allocatedReserve -= qty;
-        this.unallocatedReserve += qty;
-    }
+    // TODO: implement withdraw from the end
+    // TODO: remember that current tick can be undefined and what to do with it
 
-    public allocateOnDemand(): number {
-        const qty = this.unallocatedReserve * 0.01;
-        this.unallocatedReserve -= qty;
-        this.allocatedReserve += qty;
+    public withdraw(args: WithdrawArgs): WithdrawResult {
+        const cut = args.depositedReserve / this.depositedReserve;
 
-        return qty;
-    }
+        const reserve = this.reserveQty * cut;
+        this.reserveQty -= reserve;
 
-    public allocateOnTimer(): number | undefined {
-        const threshold = this.totalReserve * 0.99;
-        if (this.unallocatedReserve < threshold) return undefined;
+        let curTickReserve = 0;
+        let curTickInventory = 0;
 
-        return this.allocateOnDemand();
-    }
+        if (this.curTick) {
+            curTickReserve = this.curTick.reserve * cut;
+            this.curTick.reserve -= curTickReserve;
 
-    public deposit(qty: number) {
-        this.totalReserve += qty;
-        this.unallocatedReserve += qty;
-    }
+            curTickInventory = this.curTick.inventory * cut;
+            this.curTick.inventory -= curTickInventory;
+        }
 
-    public withdraw(depositedQty: number): {
-        reserve: number;
-        inventory: number;
-    } {
-        const share = depositedQty / this.totalReserve;
-        this.totalReserve -= depositedQty;
+        // TODO: force them to get from the end of the IL
+        // this will do 2 things: a) make early leavers consume IL, b) ensure withdraw has the same performance as simple swaps
+        // can be enabled if there are, for example, more than 200 inventory ranges.
+        // how to do it though?
 
-        const allocatedReserveCut = this.allocatedReserve * share;
-        const unallocatedReserveCut = this.unallocatedReserve * share;
-        const inventoryCut = this.totalInventory * share;
+        const inventory = this.inventory.reduce((acc, cur) => {
+            const inv = cur.qty * cut;
+            cur.qty -= inv;
 
-        this.allocatedReserve -= allocatedReserveCut;
-        this.unallocatedReserve -= unallocatedReserveCut;
-        this.totalInventory -= inventoryCut;
+            return acc + inv;
+        }, 0);
+
+        this.needsNewInventoryRange = true;
+        this.depositedReserve -= args.depositedReserve;
+        this.inventoryTotal -= inventory + curTickInventory;
 
         return {
-            reserve: allocatedReserveCut + unallocatedReserveCut,
-            inventory: inventoryCut,
+            reserve: reserve + curTickReserve,
+            inventory: inventory + curTickInventory,
         };
     }
 
-    public stats(): AMMStats {
-        return {
-            reserve: {
-                total: this.totalReserve,
-                unallocated: this.unallocatedReserve,
-                allocated: this.allocatedReserve,
-            },
-            inventory: {
-                total: this.totalInventory,
-            },
-        };
+    public addFees(fees: number) {
+        this.fees += fees;
     }
+
+    public isInitted() {
+        return this.initted;
+    }
+
+    private assertInitted() {
+        if (!this.isInitted()) panic("The AMM is not initialized!");
+    }
+
+    private assertNotInitted() {
+        if (this.isInitted()) panic("The AMM is already initialized");
+    }
+
+    constructor(private tickIndexFactory: TickIndexFactory) {}
 }

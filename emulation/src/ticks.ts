@@ -1,62 +1,99 @@
-import { MAX_TICK, MIN_TICK, panic, TwoSided, twoSided } from "./utils.ts";
+import { BASE_PRICE, MAX_TICK, MIN_TICK, panic } from "./utils.ts";
 
-export class Tick {
-    public onDemand = defaultInstruction();
-    public onTimer = defaultInstruction();
+export class TickIndexFactory {
+    constructor(private isInverted: boolean) {}
 
-    public addBefore(side: keyof TwoSided<number>) {
-        return this.onDemand.addBefore[side] + this.onTimer.addBefore[side];
+    public make(idx: number): TickIndex {
+        return new TickIndex(this.isInverted, idx);
     }
 
-    public removeAfter(side: keyof TwoSided<number>) {
-        return this.onDemand.removeAfter[side] + this.onTimer.removeAfter[side];
+    public min(): TickIndex {
+        return new TickIndex(this.isInverted, MIN_TICK);
+    }
+
+    public max(): TickIndex {
+        return new TickIndex(this.isInverted, MAX_TICK);
     }
 }
 
-type ReturnedTick = { allocated: boolean; tick: Tick };
-
-export class PricePlane {
-    private ticks: Partial<Record<number, Tick>> = {};
-
-    public incrementTick(): ReturnedTick {
-        if (this.curTick === MAX_TICK) panic("Max price reached");
-        this.curTick += 1;
-
-        return this.getOrCreateCurTick();
+export class TickIndex {
+    public clone(): TickIndex {
+        return new TickIndex(this.isInverted, this.idx);
     }
 
-    public decrementTick(): ReturnedTick {
-        if (this.curTick === MIN_TICK) panic("Min price reached");
-        this.curTick -= 1;
-
-        return this.getOrCreateCurTick();
+    public getPrice(): number {
+        return Math.pow(BASE_PRICE, this.toAbsolute());
     }
 
-    public getOrCreateCurTick(): ReturnedTick {
-        let tick = this.ticks[this.curTick];
+    public distance(to: TickIndex): number {
+        this.assertSameOrientation(to);
 
-        // the next tick is not allocated yet
-        if (!tick) {
-            tick = new Tick();
-            this.ticks[this.curTick] = tick;
-
-            return { allocated: false, tick };
-        }
-
-        return { allocated: true, tick };
+        return Math.abs(this.idx - to.idx);
     }
 
-    constructor(private curTick: number) {}
-}
+    public eq(to: TickIndex): boolean {
+        this.assertSameOrientation(to);
 
-export type TickInstruction = {
-    addBefore: TwoSided<number>;
-    removeAfter: TwoSided<number>;
-};
+        return this.idx === to.idx;
+    }
 
-function defaultInstruction(): TickInstruction {
-    return {
-        addBefore: twoSided(0, 0),
-        removeAfter: twoSided(0, 0),
-    };
+    public lt(to: TickIndex): boolean {
+        this.assertSameOrientation(to);
+
+        return this.idx < to.idx;
+    }
+
+    public le(to: TickIndex): boolean {
+        this.assertSameOrientation(to);
+
+        return this.idx <= to.idx;
+    }
+
+    public gt(to: TickIndex): boolean {
+        this.assertSameOrientation(to);
+
+        return this.idx > to.idx;
+    }
+
+    public ge(to: TickIndex): boolean {
+        this.assertSameOrientation(to);
+
+        return this.idx >= to.idx;
+    }
+
+    public inc() {
+        if (this.isInverted) this.idx -= 1;
+        else this.idx += 1;
+
+        this.assertInRange();
+    }
+
+    public dec() {
+        if (this.isInverted) this.idx += 1;
+        else this.idx -= 1;
+
+        this.assertInRange();
+    }
+
+    public toAbsolute(): number {
+        return this.isInverted ? -this.idx : this.idx;
+    }
+
+    public index(): number {
+        return this.idx;
+    }
+
+    constructor(private isInverted: boolean, private idx: number) {
+        this.assertInRange();
+    }
+
+    private assertSameOrientation(other: TickIndex) {
+        if (this.isInverted !== other.isInverted)
+            panic("Ticks are of different orientation");
+    }
+
+    private assertInRange() {
+        if (this.idx < MIN_TICK) panic("The tick is lower than min tick");
+        if (this.idx > MAX_TICK) panic("The tick is higher than max tick");
+    }
 }

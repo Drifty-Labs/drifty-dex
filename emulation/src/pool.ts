@@ -2,8 +2,6 @@ import { AMM } from "./amm.ts";
 import { PricePlane } from "./ticks.ts";
 import { TwoSided, twoSided } from "./utils.ts";
 
-export type SwapDirection = "base -> quote" | "quote -> base";
-
 export class Pool {
     private amm = twoSided(new AMM(), new AMM());
     private plane: PricePlane;
