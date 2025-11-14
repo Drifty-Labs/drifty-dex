@@ -1,5 +1,5 @@
 import { WithdrawResult } from "./amm.ts";
-import { InventoryTick, ReserveTick } from "./liquidity.ts";
+import { Inventory, InventoryTick, Reserve, ReserveTick } from "./liquidity.ts";
 import { TickIndex } from "./ticks.ts";
 import { panic } from "./utils.ts";
 
@@ -22,13 +22,64 @@ export class CurrentTick {
     private targetInventory: number = 0;
     private currentInventory: number = 0;
 
+    private recoveryBin: RecoveryBin;
+
+    public addInventoryFees(fees: number) {
+        this.recoveryBin.addCollateral(fees);
+    }
+
     public swap(args: CurrentTickSwapArgs): CurrentTickSwapResult {
         if (args.direction === "reserve -> inventory") {
-            const needsInventory = args.qtyIn * this.idx.getPrice();
+            // first try to recover as much IL as possibe
+            const { inventoryOut, reminderReserveIn, recoveredReserve } =
+                this.recoveryBin.recover({
+                    curTickIdx: this.idx.clone(),
+                    reserveIn: args.qtyIn,
+                });
 
-            if (needsInventory <= this.currentInventory) {
+            this.reserve.put(recoveredReserve);
+            this.inventory.notifyReserveChanged();
+
+            if (reminderReserveIn === 0) {
+                return {
+                    qtyOut: inventoryOut,
+                    reminderIn: 0,
+                };
+            }
+
+            // then, if there is no inventory in the tick, try to get a new best tick
+            if (this.currentInventory === 0) {
+                if (this.currentReserve > 0) {
+                    // if the inventory is exhausted, make room for the next tick
+                    if (this.currentReserve !== this.targetReserve)
+                        panic(
+                            "Current reserve should match target reserve after tick exhaustion"
+                        );
+
+                    this.reserve.put(this.currentReserve);
+                    this.inventory.notifyReserveChanged();
+                }
+
+                this.cleanup();
+                this.idx.inc();
+
+                const inventoryTick = this.inventory.takeBest(this.idx);
+
+                if (!inventoryTick)
+                    return {
+                        qtyOut: inventoryOut,
+                        reminderIn: reminderReserveIn,
+                    };
+
+                this.putInventoryTick(inventoryTick);
+            }
+
+            const needsInventory = reminderReserveIn * this.idx.getPrice();
+
+            // if we consume the tick only partially, leave early
+            if (needsInventory < this.currentInventory) {
                 this.currentInventory -= needsInventory;
-                this.currentReserve += args.qtyIn;
+                this.currentReserve += reminderReserveIn;
 
                 return {
                     qtyOut: needsInventory,
@@ -40,8 +91,7 @@ export class CurrentTick {
             const reminderInventory = needsInventory - getsInventory;
             const reminderReserve = reminderInventory / this.idx.getPrice();
 
-            this.currentInventory = 0;
-            this.currentReserve += args.qtyIn - reminderReserve;
+            this.currentReserve += reminderReserveIn - reminderReserve;
 
             return {
                 qtyOut: getsInventory,
@@ -49,9 +99,38 @@ export class CurrentTick {
             };
         }
 
+        // if we're swapping in an opposite direction, ask for a new tick
+        if (this.currentReserve === 0) {
+            if (this.currentInventory > 0) {
+                // if the reserve is exhausted, make room for the next tick
+                if (this.currentInventory !== this.targetInventory)
+                    panic(
+                        "Current inventory should match target inventory after tick exhaustion"
+                    );
+
+                this.inventory.putBest({
+                    idx: this.idx.clone(),
+                    inventory: this.currentInventory,
+                });
+            }
+
+            this.cleanup();
+            this.idx.dec();
+
+            const reserveTick = this.reserve.takeBest();
+
+            if (!reserveTick)
+                return {
+                    qtyOut: 0,
+                    reminderIn: args.qtyIn,
+                };
+
+            this.putReserveTick(reserveTick);
+        }
+
         const needsReserve = args.qtyIn / this.idx.getPrice();
 
-        if (needsReserve <= this.currentReserve) {
+        if (needsReserve < this.currentReserve) {
             this.currentReserve -= needsReserve;
             this.currentInventory += args.qtyIn;
 
@@ -74,18 +153,52 @@ export class CurrentTick {
         };
     }
 
-    public putInventoryTick(tick: InventoryTick) {
-        this.assertIsEmpty();
+    public deposit(reserve: number) {
+        this.targetReserve += reserve;
+        this.currentReserve += reserve;
+
+        this.targetInventory = this.targetReserve * this.idx.getPrice();
+    }
+
+    public withdrawCut(cut: number): WithdrawResult {
+        const reserve = this.currentReserve * cut;
+        this.currentReserve -= reserve;
+        this.targetReserve *= cut;
+
+        const inventory = this.currentInventory * cut;
+        this.currentInventory -= inventory;
+        this.targetInventory *= cut;
+
+        const recoveryBinInventory = this.recoveryBin.withdrawCut(cut);
+
+        return { reserve, inventory: inventory + recoveryBinInventory };
+    }
+
+    public index(): TickIndex {
+        return this.idx.clone();
+    }
+
+    public hasReserve() {
+        return this.targetReserve + this.currentReserve + 0;
+    }
+
+    private cleanup() {
+        this.targetInventory = 0;
+        this.targetReserve = 0;
+        this.currentInventory = 0;
+        this.currentReserve = 0;
+    }
+
+    private putInventoryTick(tick: InventoryTick) {
         if (tick.idx !== this.idx) panic("Ticks don't match");
 
         this.targetInventory += tick.inventory;
         this.currentInventory += tick.inventory;
 
-        this.targetReserve = tick.respectiveReserve;
+        this.targetReserve = this.targetInventory / this.idx.getPrice();
     }
 
-    public putReserveTick(tick: ReserveTick) {
-        this.assertIsEmpty();
+    private putReserveTick(tick: ReserveTick) {
         if (tick.idx !== this.idx) panic("Ticks don't match");
 
         this.targetReserve += tick.reserve;
@@ -94,61 +207,130 @@ export class CurrentTick {
         this.targetInventory = this.targetReserve * this.idx.getPrice();
     }
 
-    public deposit(reserve: number) {
-        this.targetReserve += reserve;
-        this.currentReserve += reserve;
+    constructor(
+        private idx: TickIndex,
+        private reserve: Reserve,
+        private inventory: Inventory
+    ) {
+        this.recoveryBin = new RecoveryBin(reserve, inventory);
+    }
+}
 
-        this.targetInventory = this.targetReserve * this.idx.getPrice();
+export type RecoverArgs = {
+    reserveIn: number;
+    curTickIdx: TickIndex;
+};
+
+export type RecoverResult = {
+    inventoryOut: number;
+    reminderReserveIn: number;
+    recoveredReserve: number;
+};
+
+export class RecoveryBin {
+    private collateral: number = 0;
+    private worstTick: InventoryTick | undefined = undefined;
+
+    public withdrawCut(cut: number): number {
+        let inventoryToWithdraw = this.collateral * cut;
+
+        if (this.worstTick) {
+            const worstTickCut = this.worstTick.inventory * cut;
+            inventoryToWithdraw += worstTickCut;
+
+            this.worstTick.inventory -= worstTickCut;
+
+            if (this.worstTick.inventory === 0) {
+                this.worstTick = undefined;
+            }
+        }
+
+        return inventoryToWithdraw;
     }
 
-    public withdraw(
-        depositedReserve: number,
-        respectiveReserve: number
-    ): WithdrawResult {
-        if (this.currentReserve < depositedReserve)
-            panic(
-                `Not enough reserve to withdraw: have ${this.currentReserve}, want ${depositedReserve}`
-            );
+    // only executed if the current swap is 'reserve -> inventory'
+    public recover(args: RecoverArgs): RecoverResult {
+        // take the worst IL tick
+        // if there is none, just skip - save the collateral for future recoveries
+        if (!this.worstTick) {
+            this.worstTick = this.inventory.takeWorst();
+            if (!this.worstTick)
+                return {
+                    inventoryOut: 0,
+                    reminderReserveIn: args.reserveIn,
+                    recoveredReserve: 0,
+                };
+        }
 
-        const depositedInventory = respectiveReserve * this.idx.getPrice();
-        if (this.currentInventory < depositedInventory)
-            panic(
-                `Not enough inventory to withdraw: have ${this.currentInventory}, want ${depositedInventory}`
-            );
+        // if there is no collateral, but we're currently selling off the worst tick
+        // return the worst tick back to the Inventory, so it can sell it according to its own rules
+        if (!this.hasCollateral() && this.worstTick.idx.eq(args.curTickIdx)) {
+            this.inventory.putWorstNewRange(this.worstTick);
+            this.worstTick = undefined;
 
-        this.currentReserve -= depositedReserve;
-        this.currentInventory -= depositedInventory;
+            return {
+                inventoryOut: 0,
+                reminderReserveIn: args.reserveIn,
+                recoveredReserve: 0,
+            };
+        }
 
-        return { reserve: depositedReserve, inventory: depositedInventory };
+        // calculate, how much of the inventory we can recover at the current price, using the collateral (fees) we've accumulated so far
+
+        // the formula is dI = min(I, X*P1 / |P1-P0|), where I is worst tick's inventory, X is the collateral, P0 is the worst tick's price and P1 is current price
+        // dI is the portion of inventory from the worst tick, that can be sold alongside the collateral right now to break even in terms of reserves
+
+        const p0 = this.worstTick.idx.getPrice();
+        const p1 = args.curTickIdx.getPrice();
+        const I = this.worstTick.inventory;
+        const X = this.collateral;
+
+        const dI = Math.min(I, (X * p1) / Math.abs(p1 - p0));
+
+        const hasInventory = this.collateral + dI;
+        const needsInventory = args.reserveIn * p1;
+
+        if (hasInventory >= needsInventory) {
+            const leftoverInventory = hasInventory - needsInventory;
+            const leftoverCut = leftoverInventory / hasInventory;
+
+            this.collateral *= leftoverCut;
+            const leftoverWorstTick = dI * leftoverCut;
+
+            this.worstTick.inventory =
+                this.worstTick.inventory - dI + leftoverWorstTick;
+
+            return {
+                inventoryOut: needsInventory,
+                reminderReserveIn: 0,
+                recoveredReserve: args.reserveIn,
+            };
+        }
+
+        const takeInventory = hasInventory;
+        const takeReserve = takeInventory / p1;
+
+        this.collateral = 0;
+        this.worstTick.inventory -= dI;
+
+        if (this.worstTick.inventory === 0) {
+            this.worstTick = undefined;
+        }
+
+        return {
+            inventoryOut: takeInventory,
+            reminderReserveIn: args.reserveIn - takeReserve,
+            recoveredReserve: takeReserve,
+        };
     }
 
-    public decrement() {
-        this.assertIsEmpty();
-        this.idx.dec();
+    public addCollateral(fees: number) {
+        this.collateral += fees;
     }
 
-    public increment() {
-        this.assertIsEmpty();
-        this.idx.inc();
+    public hasCollateral(): boolean {
+        return this.collateral > 0;
     }
 
-    public index(): TickIndex {
-        return this.idx.clone();
-    }
-
-    private assertIsEmpty() {
-        if (!this.isEmpty()) panic("Current tick is not empty");
-    }
-
-    public isEmpty() {
-        return (
-            this.targetReserve +
-                this.targetInventory +
-                this.currentReserve +
-                this.currentInventory ===
-            0
-        );
-    }
-
-    constructor(private idx: TickIndex) {}
+    constructor(private reserve: Reserve, private inventory: Inventory) {}
 }

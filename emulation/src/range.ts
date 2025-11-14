@@ -58,6 +58,15 @@ export class ReserveRange extends Range {
         this.qty += qty;
     }
 
+    public withdrawCut(cut: number): number {
+        this.assertNonEmpty();
+
+        const qty = this.qty * cut;
+        this.qty -= qty;
+
+        return qty;
+    }
+
     public override takeBest(): TakeResult {
         this.assertNonEmpty();
 
@@ -114,6 +123,12 @@ export class InventoryRange extends Range {
         this.left.inc();
 
         return { qty, tickIdx: tick };
+    }
+
+    public betTickIdx(): TickIndex {
+        this.assertNonEmpty();
+
+        return this.left.clone();
     }
 
     public override takeWorst(): TakeResult {

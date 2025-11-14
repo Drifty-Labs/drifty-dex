@@ -17,8 +17,11 @@ export class TickIndexFactory {
 }
 
 export class TickIndex {
-    public clone(): TickIndex {
-        return new TickIndex(this.isInverted, this.idx);
+    public clone(invert?: boolean): TickIndex {
+        return new TickIndex(
+            invert ? !this.isInverted : this.isInverted,
+            this.idx
+        );
     }
 
     public getPrice(): number {

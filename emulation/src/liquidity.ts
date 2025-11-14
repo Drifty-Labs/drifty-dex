@@ -4,12 +4,17 @@ import { panic } from "./utils.ts";
 
 export type ReserveTick = {
     reserve: number;
-    respectiveInventory: number;
     idx: TickIndex;
 };
 
 export class Reserve {
     private range: ReserveRange | undefined = undefined;
+
+    public withdrawCut(cut: number): number {
+        this.assertInitted();
+
+        return this.range!.withdrawCut(cut);
+    }
 
     public get width(): number {
         this.assertInitted();
@@ -17,26 +22,24 @@ export class Reserve {
         return this.range!.width;
     }
 
-    public takeBest(): ReserveTick {
-        this.assertInitted();
+    public takeBest(): ReserveTick | undefined {
+        if (!this.isInitted()) return undefined;
 
         const result = this.range!.takeBest();
 
         return {
             reserve: result.qty,
-            respectiveInventory: result.qty * result.tickIdx.getPrice(),
             idx: result.tickIdx,
         };
     }
 
-    public takeWorst(): ReserveTick {
-        this.assertInitted();
+    public takeWorst(): ReserveTick | undefined {
+        if (!this.isInitted()) return undefined;
 
         const result = this.range!.takeWorst();
 
         return {
             reserve: result.qty,
-            respectiveInventory: result.qty * result.tickIdx.getPrice(),
             idx: result.tickIdx,
         };
     }
@@ -73,20 +76,31 @@ export class Reserve {
 
 export type InventoryTick = {
     inventory: number;
-    respectiveReserve: number;
     idx: TickIndex;
 };
 
 export class Inventory {
-    private usedReserve: number = 0;
+    private respectiveReserve: number = 0;
     private allocatedQty: number = 0;
     private shouldSpawnNew: boolean = true;
     private ranges: InventoryRange[] = [];
 
-    public takeBest(): InventoryTick {
-        this.assertNotEmpty();
+    public getRespectiveReserve() {
+        return this.respectiveReserve;
+    }
+
+    public takeBest(curTickIdx: TickIndex): InventoryTick | undefined {
+        if (this.isEmpty()) return undefined;
 
         const range = this.ranges[0];
+
+        // IL ranges can have voids in between
+        // check if the best is the same as the provided one, otherwise return undefined
+        const bestTickIdx = range.betTickIdx();
+        if (!bestTickIdx.eq(curTickIdx)) {
+            return undefined;
+        }
+
         const result = range.takeBest();
 
         if (range.isEmpty()) {
@@ -96,17 +110,16 @@ export class Inventory {
         this.allocatedQty -= result.qty;
 
         const unusedReserve = result.qty / result.tickIdx.getPrice();
-        this.usedReserve -= unusedReserve;
+        this.respectiveReserve -= unusedReserve;
 
         return {
             inventory: result.qty,
-            respectiveReserve: unusedReserve,
             idx: result.tickIdx,
         };
     }
 
-    public takeWorst(): InventoryTick {
-        this.assertNotEmpty();
+    public takeWorst(): InventoryTick | undefined {
+        if (this.isEmpty()) return undefined;
 
         const range = this.ranges[this.ranges.length - 1];
         const result = range.takeWorst();
@@ -118,17 +131,30 @@ export class Inventory {
         this.allocatedQty -= result.qty;
 
         const unusedReserve = result.qty / result.tickIdx.getPrice();
-        this.usedReserve -= unusedReserve;
+        this.respectiveReserve -= unusedReserve;
 
         return {
             inventory: result.qty,
-            respectiveReserve: unusedReserve,
             idx: result.tickIdx,
         };
     }
 
+    public putWorstNewRange(tick: InventoryTick) {
+        this.respectiveReserve += tick.inventory / tick.idx.getPrice();
+        this.allocatedQty += tick.inventory;
+
+        const range = new InventoryRange(
+            tick.inventory,
+            tick.idx,
+            tick.idx.clone()
+        );
+        this.ranges.push(range);
+
+        return;
+    }
+
     public putBest(tick: InventoryTick) {
-        this.usedReserve += tick.respectiveReserve;
+        this.respectiveReserve += tick.inventory / tick.idx.getPrice();
         this.allocatedQty += tick.inventory;
 
         if (this.shouldSpawnNew) {
