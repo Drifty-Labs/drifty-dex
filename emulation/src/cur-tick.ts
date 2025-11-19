@@ -16,9 +16,16 @@ export type CurrentTickSwapResult = {
 };
 
 /**
- * Represents the current price tick in the AMM.
- * This class manages the liquidity at the current tick, handling swaps and transitions to adjacent ticks.
- * It also contains the `RecoveryBin`, which is responsible for impermanent loss mitigation.
+ * Captures the state of the currently active tick for a single AMM side.
+ *
+ * It is the only mutable location that swaps touch directly. All other ticks
+ * live either in the {@link Reserve} (to the left of price) or {@link Inventory}
+ * (to the right of price). As swaps consume one side, {@link CurrentTick}
+ * requests a fresh chunk from the respective structure and advances the tick
+ * index.
+ *
+ * The class also hosts the {@link RecoveryBin} responsible for fee-funded IL
+ * recovery before regular inventory is touched.
  */
 export class CurrentTick {
     private targetReserve: number = 0;
@@ -40,19 +47,18 @@ export class CurrentTick {
     /**
      * Executes a swap within the current tick.
      *
-     * This function handles the logic for swapping assets in either direction (reserve to inventory or inventory to reserve).
-     * It first attempts to use the `RecoveryBin` to recover any impermanent loss. If there is remaining liquidity
-     * to be swapped, it then proceeds with the swap using the current tick's liquidity.
+     * Steps for `reserve -> inventory`:
+     * 1. Let {@link RecoveryBin} try to match the input with the worst underwater
+     *    tick plus accumulated collateral.
+     * 2. If recovery does not exhaust the input, consume the live inventory and
+     *    track how much reserve remains for the outer {@link Pool} loop.
      *
-     * If the current tick is fully consumed, the function returns the remaining amount of the input asset, which will be
-     * handled by the `Pool` by moving to the next available tick.
-     *
-     * @param args The swap arguments, including the direction and input quantity.
-     * @returns The result of the swap, including the output quantity and any remaining input quantity.
+     * For `inventory -> reserve`, only the live reserve is used. Any leftover
+     * inventory is bubbled up so the pool can decrement ticks and continue.
      */
     public swap(args: CurrentTickSwapArgs): CurrentTickSwapResult {
         if (args.direction === "reserve -> inventory") {
-            // first try to recover as much IL as possibe
+            // first try to recover as much IL as possible
             const { inventoryOut, reminderReserveIn, recoveredReserve } =
                 this.recoveryBin.recover({
                     curTickIdx: this.idx.clone(),
@@ -126,9 +132,8 @@ export class CurrentTick {
     }
 
     /**
-     * Deposits reserve into the current tick.
-     * This is typically called when new liquidity is added to the AMM.
-     * @param reserve The amount of reserve to deposit.
+     * Deposits reserve into the current tick and recomputes the target
+     * inventory value the tick wants to hold to remain balanced.
      */
     public deposit(reserve: number) {
         this.targetReserve += reserve;
@@ -138,10 +143,8 @@ export class CurrentTick {
     }
 
     /**
-     * Withdraws a portion of the liquidity from the current tick.
-     * This is called when a user withdraws their liquidity from the AMM.
-     * @param cut The percentage of liquidity to withdraw (0 to 1).
-     * @returns The amount of reserve and inventory withdrawn.
+     * Withdraws a proportional slice of the tick’s reserve/inventory plus the
+     * recovery bin collateral.
      */
     public withdrawCut(cut: number): WithdrawResult {
         const reserve = this.currentReserve * cut;
@@ -165,32 +168,22 @@ export class CurrentTick {
         return this.idx.clone();
     }
 
-    /**
-     * Checks if there is any reserve in the current tick.
-     * @returns `true` if there is reserve, `false` otherwise.
-     */
     public hasReserve() {
         return this.currentReserve > 0;
     }
 
-    /**
-     * Checks if there is any inventory in the current tick.
-     * @returns `true` if there is inventory, `false` otherwise.
-     */
     public hasInventory() {
         return this.currentInventory > 0;
     }
 
     /**
-     * Moves to the next tick.
-     * If the current tick's inventory is exhausted, the remaining reserve is moved to the general reserve
-     * and the AMM attempts to load the next inventory tick.
+     * Moves to the next tick when inventory is exhausted. Any leftover reserve
+     * is pushed back into the global reserve book before requesting the next
+     * best inventory tick.
      */
     public increment() {
-        // then, if there is no inventory in the tick, try to get a new best tick
         if (this.currentInventory === 0) {
             if (this.currentReserve > 0) {
-                // if the inventory is exhausted, make room for the next tick
                 if (this.currentReserve !== this.targetReserve)
                     panic(
                         "Current reserve should match target reserve after tick exhaustion"
@@ -211,15 +204,12 @@ export class CurrentTick {
     }
 
     /**
-     * Moves to the previous tick.
-     * If the current tick's reserve is exhausted, the remaining inventory is moved to the general inventory
-     * and the AMM attempts to load the next reserve tick.
+     * Moves to the previous tick when reserve is exhausted. Any leftover
+     * inventory is pushed back so the next swap direction can consume it.
      */
     public decrement() {
-        // if we're swapping in an opposite direction, ask for a new tick
         if (this.currentReserve === 0) {
             if (this.currentInventory > 0) {
-                // if the reserve is exhausted, make room for the next tick
                 if (this.currentInventory !== this.targetInventory)
                     panic(
                         "Current inventory should match target inventory after tick exhaustion"
@@ -242,8 +232,8 @@ export class CurrentTick {
     }
 
     /**
-     * Resets the state of the current tick.
-     * This is called when moving to a new tick.
+     * Resets the current tick’s accumulators before loading data for the next
+     * price level.
      */
     private cleanup() {
         this.targetInventory = 0;
@@ -252,11 +242,6 @@ export class CurrentTick {
         this.currentReserve = 0;
     }
 
-    /**
-     * Puts an inventory tick into the current tick.
-     * This is called when a new inventory tick is loaded.
-     * @param tick The inventory tick to put.
-     */
     private putInventoryTick(tick: InventoryTick) {
         if (tick.idx !== this.idx) panic("Ticks don't match");
 
@@ -266,11 +251,6 @@ export class CurrentTick {
         this.targetReserve = this.targetInventory / this.idx.getPrice();
     }
 
-    /**
-     * Puts a reserve tick into the current tick.
-     * This is called when a new reserve tick is loaded.
-     * @param tick The reserve tick to put.
-     */
     private putReserveTick(tick: ReserveTick) {
         if (tick.idx !== this.idx) panic("Ticks don't match");
 
@@ -280,12 +260,6 @@ export class CurrentTick {
         this.targetInventory = this.targetReserve * this.idx.getPrice();
     }
 
-    /**
-     * Creates a new `CurrentTick`.
-     * @param idx The index of the current tick.
-     * @param reserve The AMM's reserve.
-     * @param inventory The AMM's inventory.
-     */
     constructor(
         private idx: TickIndex,
         private reserve: Reserve,
@@ -307,20 +281,12 @@ export type RecoverResult = {
 };
 
 /**
- * The `RecoveryBin` is a mechanism to mitigate impermanent loss (IL).
- * It accumulates fees (collateral) and uses them to buy back the inventory asset at a better price,
- * effectively recovering the value lost due to price changes.
+ * Fee-funded IL repair engine that focuses on a single worst tick at a time.
  */
 export class RecoveryBin {
     private collateral: number = 0;
     private worstTick: InventoryTick | undefined = undefined;
 
-    /**
-     * Withdraws a portion of the collateral and the worst tick inventory.
-     * This is called when a user withdraws their liquidity from the AMM.
-     * @param cut The percentage of liquidity to withdraw (0 to 1).
-     * @returns The amount of inventory withdrawn from the recovery bin.
-     */
     public withdrawCut(cut: number): number {
         let inventoryToWithdraw = this.collateral * cut;
 
@@ -339,19 +305,15 @@ export class RecoveryBin {
     }
 
     /**
-     * Attempts to recover impermanent loss by using the accumulated fees (collateral)
-     * to buy back a portion of the inventory from the worst tick.
+     * Uses collateral + the worst inventory tick to offset fresh reserve inflow.
      *
-     * The formula `dI = min(I, X*P1 / |P1-P0|)` calculates the amount of inventory (`dI`) that can be recovered
-     * at the current price (`P1`) using the available collateral (`X`) and the price of the worst tick (`P0`).
-     *
-     * @param args The recovery arguments, including the amount of reserve being swapped in and the current tick index.
-     * @returns The result of the recovery, including the amount of inventory recovered and any remaining reserve.
+     * - If no worst tick is cached, it pops one from {@link Inventory.takeWorst}.
+     * - If the current price equals the worst tick and there is no collateral,
+     *   the tick is returned untouched—the outer swap will sell it normally.
+     * - Otherwise it applies `dI = min(I, X*P1 / |P1-P0|)` to determine how
+     *   much inventory can be safely recovered right now.
      */
-    // only executed if the current swap is 'reserve -> inventory'
     public recover(args: RecoverArgs): RecoverResult {
-        // take the worst IL tick
-        // if there is none, just skip - save the collateral for future recoveries
         if (!this.worstTick) {
             this.worstTick = this.inventory.takeWorst();
             if (!this.worstTick)
@@ -362,8 +324,6 @@ export class RecoveryBin {
                 };
         }
 
-        // if there is no collateral, but we're currently selling off the worst tick
-        // return the worst tick back to the Inventory, so it can sell it according to its own rules
         if (!this.hasCollateral() && this.worstTick.idx.eq(args.curTickIdx)) {
             this.inventory.putWorstNewRange(this.worstTick);
             this.worstTick = undefined;
@@ -374,11 +334,6 @@ export class RecoveryBin {
                 recoveredReserve: 0,
             };
         }
-
-        // calculate, how much of the inventory we can recover at the current price, using the collateral (fees) we've accumulated so far
-
-        // the formula is dI = min(I, X*P1 / |P1-P0|), where I is worst tick's inventory, X is the collateral, P0 is the worst tick's price and P1 is current price
-        // dI is the portion of inventory from the worst tick, that can be sold alongside the collateral right now to break even in terms of reserves
 
         const p0 = this.worstTick.idx.getPrice();
         const p1 = args.curTickIdx.getPrice();
@@ -424,26 +379,13 @@ export class RecoveryBin {
         };
     }
 
-    /**
-     * Adds collateral (fees) to the recovery bin.
-     * @param fees The amount of fees to add.
-     */
     public addCollateral(fees: number) {
         this.collateral += fees;
     }
 
-    /**
-     * Checks if there is any collateral in the recovery bin.
-     * @returns `true` if there is collateral, `false` otherwise.
-     */
     public hasCollateral(): boolean {
         return this.collateral > 0;
     }
 
-    /**
-     * Creates a new `RecoveryBin`.
-     * @param reserve The AMM's reserve.
-     * @param inventory The AMM's inventory.
-     */
     constructor(private reserve: Reserve, private inventory: Inventory) {}
 }

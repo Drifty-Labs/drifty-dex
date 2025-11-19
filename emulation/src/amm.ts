@@ -33,9 +33,25 @@ export type WithdrawResult = {
 };
 
 /**
- * Represents an Automated Market Maker (AMM).
- * Each AMM is responsible for managing a single asset, holding a reserve of the asset and an inventory of the other asset in the pair.
- * It processes deposits, withdrawals, and swaps, and tracks and recovers impermanent loss.
+ * Represents one side of the pool (either base or quote) and encapsulates reserve
+ * management, concentrated inventory created by swaps, and IL recovery duties.
+ *
+ * ### Stable vs drifting behavior
+ * Stable AMMs are expected to initialize their reserve range once and keep the
+ * left bound at {@link MIN_TICK}. Drifting AMMs are coordinated externally so
+ * their reserve window always spans from the current tick back to the opposite
+ * side’s worst inventory tick. That policy guarantees that one of the sides
+ * always has liquidity covering any price path while the other side gradually
+ * sheds IL.
+ *
+ * ### Responsibilities
+ * - Track the total deposited reserve so proportional withdrawals remain fair.
+ * - Split deposits between the long-lived reserve range and the currently active
+ *   tick, ensuring the live tick always has funds to serve swaps.
+ * - Push swap-generated inventory into {@link Inventory} ranges and keep
+ *   {@link CurrentTick} in sync.
+ * - During withdrawals, convert the worst underwater ticks back into reserve so
+ *   early exiters pay the highest IL cost.
  */
 export class AMM {
     private depositedReserve: number = 0;
@@ -72,19 +88,14 @@ export class AMM {
     /**
      * Deposits liquidity into the AMM.
      *
-     * This function allows a user to deposit their reserve assets into the AMM.
-     * If the reserve is not yet initialized (i.e., this is the first deposit),
-     * the entire amount is deposited into the current tick.
-     *
-     * If the reserve has been initialized, the deposited amount is split proportionally
-     * between the existing reserve range and the current tick. This ensures that the
-     * liquidity is distributed across the active trading range.
-     *
-     * If the reserve has been initialized, the deposited amount is split proportionally
-     * between the existing reserve range and the current tick. This ensures that the
-     * liquidity is distributed across the active trading range.
-     *
-     * @param args An object containing the amount of reserve to deposit.
+     * - The very first deposit bootstraps the reserve range to span from
+     *   {@link TickIndex.min} up to the current tick (stable AMM behavior) or an
+     *   externally supplied drifting window.
+     * - Subsequent deposits split `args.reserve` across the long-lived reserve
+     *   range and the current tick so the live tick always gets one extra slice
+     *   of liquidity (`fullWidth = reserve.width + 1`).
+     * - Every deposit notifies the inventory book that a fresh reserve baseline
+     *   exists, so new swap inventory spawns new {@link InventoryRange}s.
      */
     public deposit(args: DepositArgs): void {
         if (!this.reserve.isInitted()) {
@@ -109,20 +120,15 @@ export class AMM {
     /**
      * Withdraws a user's liquidity from the AMM.
      *
-     * This function calculates the user's share of the total liquidity based on their deposited reserve.
-     * It then withdraws the corresponding amounts from the reserve and the current tick.
+     * The `cut` reflects how much of the total deposited reserve the caller owns.
+     * That same ratio is removed from the long-lived reserve, the current tick,
+     * and the outstanding inventory.
      *
-     * A key part of this function is handling the withdrawal of inventory that has been affected by impermanent loss.
-     * To minimize the impact of IL, the function identify the inventory at the worst (least profitable) ticks
-     * and swaps it back to the reserve asset. This "backward swapping" strategy aims to improve the returns
-     * for users who withdraw their liquidity, especially in volatile market conditions.
-     *
-     * FIXME: this is simply wrong. the withdrawal is made backwards to enable two things:
-     * 1. punish early leavers - they take the most IL with them, improving the IL for everybody else
-     * 2. make withdrawals the same performance as a swap, because now withdrawals have to only iterate through a specific number of ticks LESS than total inventory ticks.
-     *
-     * @param args An object containing the amount of deposited reserve to withdraw.
-     * @returns An object containing the amounts of reserve and inventory withdrawn.
+     * After draining the live tick, the method walks inventory **backwards**
+     * (from worst tick to best) converting it back into reserve-equivalent value.
+     * This design intentionally punishes early exiters (they crystallize the most
+     * IL) and caps the number of ticks a withdrawal needs to inspect, matching
+     * swap complexity.
      */
     public withdraw(args: WithdrawArgs): WithdrawResult {
         const cut = args.depositedReserve / this.depositedReserve;
@@ -185,16 +191,18 @@ export class AMM {
     }
 
     /**
-     * Gets the current tick of the AMM.
-     * @returns The current tick.
+     * Exposes the mutable {@link CurrentTick}. External orchestrators use this to
+     * coordinate swaps and, for drifting AMMs, to enforce the moving window
+     * policy.
      */
     public curTick(): CurrentTick {
         return this.currentTick;
     }
 
     /**
-     * Creates a new AMM.
-     * @param curTickIdx The initial tick index.
+     * Creates a new AMM bound to a starting tick index. The tick orientation is
+     * already encoded inside {@link TickIndex} so the same code path works for
+     * base and quote sides.
      */
     constructor(curTickIdx: TickIndex) {
         this.currentTick = new CurrentTick(

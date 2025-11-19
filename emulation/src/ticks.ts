@@ -1,8 +1,9 @@
 import { BASE_PRICE, MAX_TICK, MIN_TICK, panic } from "./utils.ts";
 
 /**
- * A factory for creating `TickIndex` instances with a specific orientation.
- * This is useful for creating ticks for the base and quote assets, which have opposite orientations.
+ * Factory for producing ticks with a preset orientation (normal for base,
+ * inverted for quote). Keeps the main code agnostic to which side it is
+ * dealing with while still sharing the same logic.
  */
 export class TickIndexFactory {
     constructor(private isInverted: boolean) {}
@@ -34,22 +35,20 @@ export class TickIndexFactory {
 }
 
 /**
- * Represents the index of a price tick in the AMM.
- * Ticks are logarithmic, meaning that the price difference between ticks is proportional to the price.
- * The `isInverted` flag determines the orientation of the tick, which is used to distinguish between the base and quote assets.
+ * Log-price coordinate used everywhere in the simulator. `isInverted`
+ * guarantees that “left of price” always means reserve and “right of price”
+ * always means inventory, regardless of whether we are looking at the base or
+ * quote side.
  *
- * The price is calculated as `BASE_PRICE ^ tick_index`. For a regular tick, the index is positive, so a higher index means a higher price.
- * For an inverted tick, the index is negative, so a higher absolute index means a lower price.
- *
- * This allows for a unified logic for both sides of the AMM. The reserve is always on the left of the current price,
- * and the inventory is always on the right. Decrementing the tick index always moves towards a higher price for the reserve,
- * and incrementing the tick index always moves towards a higher price for the inventory.
+ * Prices follow `BASE_PRICE ^ index` where `index` is the orientation-aware
+ * value ({@link toAbsolute}). This keeps math consistent when stable and
+ * drifting AMMs march in opposite directions.
  */
 export class TickIndex {
     /**
-     * Clones the tick index, with the option to invert its orientation.
+     * Clones the tick index, optionally flipping its orientation. Handy when we
+     * need the “mirror” tick for the opposite AMM side.
      * @param invert If `true`, the new tick index will have the opposite orientation.
-     * @returns A new `TickIndex` instance.
      */
     public clone(invert?: boolean): TickIndex {
         return new TickIndex(
@@ -141,10 +140,7 @@ export class TickIndex {
         return this.idx >= to.idx;
     }
 
-    /**
-     * Increments the tick index.
-     * The direction of the increment depends on the orientation of the tick.
-     */
+    /** Moves one tick to the right (higher price for inventory). */
     public inc() {
         if (this.isInverted) this.idx -= 1;
         else this.idx += 1;
@@ -152,10 +148,7 @@ export class TickIndex {
         this.assertInRange();
     }
 
-    /**
-     * Decrements the tick index.
-     * The direction of the decrement depends on the orientation of the tick.
-     */
+    /** Moves one tick to the left (higher price for reserve). */
     public dec() {
         if (this.isInverted) this.idx += 1;
         else this.idx -= 1;

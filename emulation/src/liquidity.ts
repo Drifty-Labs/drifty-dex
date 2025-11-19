@@ -13,9 +13,9 @@ export type ReserveTick = {
 };
 
 /**
- * Manages the reserve liquidity of an AMM.
- * The reserve is the liquidity that is not currently being used for active trading.
- * It is stored in a `ReserveRange`, which is a range of ticks with a certain amount of liquidity.
+ * Manages the reserve liquidity that sits idle to the left of the current
+ * price. Reserve liquidity is uniform across its range and supplies the next
+ * {@link CurrentTick} whenever the active tick needs more depth.
  */
 export class Reserve {
     private range: ReserveRange | undefined = undefined;
@@ -92,9 +92,8 @@ export class Reserve {
 
     /**
      * Initializes the reserve with a given amount of liquidity and range.
-     * @param qty The amount of liquidity.
-     * @param left The left (lowest price) tick of the range.
-     * @param right The right (highest price) tick of the range.
+     * Stable AMMs call this once (MIN_TICK to current), while drifting AMMs
+     * are reinitialized by external orchestrators to match their moving window.
      */
     public init(qty: number, left: TickIndex, right: TickIndex) {
         this.assertNotInitted();
@@ -130,9 +129,10 @@ export type InventoryTick = {
 };
 
 /**
- * Manages the inventory liquidity of an AMM.
- * The inventory is the liquidity that has been acquired through swaps and is now held by the AMM.
- * It is stored in a series of `InventoryRange`s, which represent concentrated liquidity positions.
+ * Tracks swap-generated liquidity to the right of the current price. Inventory
+ * buckets correspond to concentrated LP positions that the AMM acquired while
+ * filling trades. Each bucket remembers how much reserve was spent so IL can be
+ * measured and unwound fairly.
  */
 export class Inventory {
     private respectiveReserve: number = 0;

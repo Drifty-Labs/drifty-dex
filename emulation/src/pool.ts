@@ -19,9 +19,16 @@ export type SwapResult = {
 };
 
 /**
- * Represents a liquidity pool, which is the main entry point for interacting with the DEX.
- * A pool consists of two pairs of AMMs: a stable AMM and a drifting AMM for both the base and quote assets.
- * This design allows for both stable, wide-range liquidity and concentrated, dynamic liquidity.
+ * Top-level orchestrator that exposes a dual-AMM pool (stable + drifting per
+ * side). The stable AMM covers the whole price curve, while the drifting AMM is
+ * expected to follow the rules described earlier (left bound equals opposite
+ * worst inventory tick, right bound equals current tick - 1).
+ *
+ * Responsibilities:
+ * - Route deposits/withdrawals proportionally between stable and drifting AMMs.
+ * - Apply dynamic fees that scale with aggregated IL.
+ * - Route swaps across four AMMs in a deterministic order, keeping tick indices
+ *   synchronized for both base and quote sides.
  */
 export class Pool {
     private stableAMM: TwoSided<AMM>;
@@ -73,11 +80,9 @@ export class Pool {
     }
 
     /**
-     * Executes a swap in the pool.
-     * Fees are calculated and deducted from the input quantity.
-     * The fees are then distributed to the appropriate AMMs for IL recovery.
-     * @param args The swap arguments.
-     * @returns The result of the swap, including the output quantity.
+     * Executes a swap, takes fees upfront, and feeds the RecoveryBins of the
+     * AMMs that are about to receive inventory (quote AMMs when buying quote,
+     * base AMMs when buying base).
      */
     public swap(args: SwapArgs): SwapResult {
         const fees = args.qtyIn * this.getFees();
@@ -86,8 +91,6 @@ export class Pool {
         const stableFees = fees * STABLE_AMM_CUT;
         const driftingFees = fees - stableFees;
 
-        // the price is defined as "how much of the quote asset do I get for a unit of the base asset"
-        // so this direction is where we use the price directly and decrement ticks as we go
         if (args.direction === "base -> quote") {
             this.stableAMM["quote"].curTick().addInventoryFees(stableFees);
             this.driftingAMM["quote"].curTick().addInventoryFees(driftingFees);
@@ -134,12 +137,16 @@ export class Pool {
     }
 
     /**
-     * The internal swap function that iterates through the AMMs to execute the swap.
-     * It continues swapping until the input quantity is fully consumed.
-     * If a tick is exhausted, it moves to the next available tick.
-     * @param qtyIn The input quantity for the swap.
-     * @param direction The direction of the swap.
-     * @returns The total output quantity from the swap.
+     * Internal swap scheduler shared by both directions.
+     *
+     * - Iterates over all four AMMs in a fixed order, letting each try to fill
+     *   as much of `qtyIn` as it can on the current tick.
+     * - If none of them make progress (`hasAny === false`), the function moves
+     *   ticks forward/backward in lockstep (base increments while quote
+     *   decrements for base->quote swaps, and vice versa) until new liquidity is
+     *   available.
+     * - After any tick move it re-validates that all AMMs point at the same
+     *   absolute index to guarantee price coherence.
      */
     private _swap(qtyIn: number, direction: SwapDirection): number {
         let qtyOut = 0;
@@ -161,12 +168,6 @@ export class Pool {
             [this.driftingAMM.quote, quoteDirection],
         ];
 
-        // The swap loop continues as long as there is input quantity to be swapped.
-        // It iterates through all four AMMs, attempting to swap a portion of the input quantity in each.
-        // If a swap is successful, the `hasAny` flag is set to true.
-        // If the input quantity is fully swapped, the loop returns the total output quantity.
-        // If an entire tick is consumed across all AMMs without filling the swap, the tick is incremented or decremented,
-        // and the loop continues on the new tick.
         while (true) {
             let hasAny = false;
 

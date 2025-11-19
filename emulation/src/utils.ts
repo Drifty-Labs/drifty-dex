@@ -9,6 +9,13 @@ export const BASE_PRICE = 1.0001;
 export const TEN_PERCENT_TICKS = 954;
 
 /**
+ * Utility helpers shared across the emulation layer.
+ * - Tick math helpers (price, next/prev) keep orientation handling consistent.
+ * - `twoSided` is used to pair base/quote objects without manual duplication.
+ * - `panic` establishes a single way to signal invariant violations.
+ */
+
+/**
  * Converts a tick index to a price.
  * @param tick The tick index.
  * @param side The side of the pool (`base` or `quote`).
