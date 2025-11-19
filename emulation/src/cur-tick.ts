@@ -15,6 +15,11 @@ export type CurrentTickSwapResult = {
     reminderIn: number;
 };
 
+/**
+ * Represents the current price tick in the AMM.
+ * This class manages the liquidity at the current tick, handling swaps and transitions to adjacent ticks.
+ * It also contains the `RecoveryBin`, which is responsible for impermanent loss mitigation.
+ */
 export class CurrentTick {
     private targetReserve: number = 0;
     private currentReserve: number = 0;
@@ -24,10 +29,27 @@ export class CurrentTick {
 
     private recoveryBin: RecoveryBin;
 
+    /**
+     * Adds fees to the recovery bin to be used as collateral for IL recovery.
+     * @param fees The amount of fees to add.
+     */
     public addInventoryFees(fees: number) {
         this.recoveryBin.addCollateral(fees);
     }
 
+    /**
+     * Executes a swap within the current tick.
+     *
+     * This function handles the logic for swapping assets in either direction (reserve to inventory or inventory to reserve).
+     * It first attempts to use the `RecoveryBin` to recover any impermanent loss. If there is remaining liquidity
+     * to be swapped, it then proceeds with the swap using the current tick's liquidity.
+     *
+     * If the current tick is fully consumed, the function returns the remaining amount of the input asset, which will be
+     * handled by the `Pool` by moving to the next available tick.
+     *
+     * @param args The swap arguments, including the direction and input quantity.
+     * @returns The result of the swap, including the output quantity and any remaining input quantity.
+     */
     public swap(args: CurrentTickSwapArgs): CurrentTickSwapResult {
         if (args.direction === "reserve -> inventory") {
             // first try to recover as much IL as possibe
@@ -47,32 +69,8 @@ export class CurrentTick {
                 };
             }
 
-            // then, if there is no inventory in the tick, try to get a new best tick
-            if (this.currentInventory === 0) {
-                if (this.currentReserve > 0) {
-                    // if the inventory is exhausted, make room for the next tick
-                    if (this.currentReserve !== this.targetReserve)
-                        panic(
-                            "Current reserve should match target reserve after tick exhaustion"
-                        );
-
-                    this.reserve.put(this.currentReserve);
-                    this.inventory.notifyReserveChanged();
-                }
-
-                this.cleanup();
-                this.idx.inc();
-
-                const inventoryTick = this.inventory.takeBest(this.idx);
-
-                if (!inventoryTick)
-                    return {
-                        qtyOut: inventoryOut,
-                        reminderIn: reminderReserveIn,
-                    };
-
-                this.putInventoryTick(inventoryTick);
-            }
+            if (this.currentInventory === 0)
+                return { qtyOut: inventoryOut, reminderIn: reminderReserveIn };
 
             const needsInventory = reminderReserveIn * this.idx.getPrice();
 
@@ -99,34 +97,8 @@ export class CurrentTick {
             };
         }
 
-        // if we're swapping in an opposite direction, ask for a new tick
-        if (this.currentReserve === 0) {
-            if (this.currentInventory > 0) {
-                // if the reserve is exhausted, make room for the next tick
-                if (this.currentInventory !== this.targetInventory)
-                    panic(
-                        "Current inventory should match target inventory after tick exhaustion"
-                    );
-
-                this.inventory.putBest({
-                    idx: this.idx.clone(),
-                    inventory: this.currentInventory,
-                });
-            }
-
-            this.cleanup();
-            this.idx.dec();
-
-            const reserveTick = this.reserve.takeBest();
-
-            if (!reserveTick)
-                return {
-                    qtyOut: 0,
-                    reminderIn: args.qtyIn,
-                };
-
-            this.putReserveTick(reserveTick);
-        }
+        if (this.currentReserve === 0)
+            return { qtyOut: 0, reminderIn: args.qtyIn };
 
         const needsReserve = args.qtyIn / this.idx.getPrice();
 
@@ -153,6 +125,11 @@ export class CurrentTick {
         };
     }
 
+    /**
+     * Deposits reserve into the current tick.
+     * This is typically called when new liquidity is added to the AMM.
+     * @param reserve The amount of reserve to deposit.
+     */
     public deposit(reserve: number) {
         this.targetReserve += reserve;
         this.currentReserve += reserve;
@@ -160,6 +137,12 @@ export class CurrentTick {
         this.targetInventory = this.targetReserve * this.idx.getPrice();
     }
 
+    /**
+     * Withdraws a portion of the liquidity from the current tick.
+     * This is called when a user withdraws their liquidity from the AMM.
+     * @param cut The percentage of liquidity to withdraw (0 to 1).
+     * @returns The amount of reserve and inventory withdrawn.
+     */
     public withdrawCut(cut: number): WithdrawResult {
         const reserve = this.currentReserve * cut;
         this.currentReserve -= reserve;
@@ -174,14 +157,94 @@ export class CurrentTick {
         return { reserve, inventory: inventory + recoveryBinInventory };
     }
 
+    /**
+     * Returns a clone of the current tick index.
+     * @returns The cloned tick index.
+     */
     public index(): TickIndex {
         return this.idx.clone();
     }
 
+    /**
+     * Checks if there is any reserve in the current tick.
+     * @returns `true` if there is reserve, `false` otherwise.
+     */
     public hasReserve() {
-        return this.targetReserve + this.currentReserve + 0;
+        return this.currentReserve > 0;
     }
 
+    /**
+     * Checks if there is any inventory in the current tick.
+     * @returns `true` if there is inventory, `false` otherwise.
+     */
+    public hasInventory() {
+        return this.currentInventory > 0;
+    }
+
+    /**
+     * Moves to the next tick.
+     * If the current tick's inventory is exhausted, the remaining reserve is moved to the general reserve
+     * and the AMM attempts to load the next inventory tick.
+     */
+    public increment() {
+        // then, if there is no inventory in the tick, try to get a new best tick
+        if (this.currentInventory === 0) {
+            if (this.currentReserve > 0) {
+                // if the inventory is exhausted, make room for the next tick
+                if (this.currentReserve !== this.targetReserve)
+                    panic(
+                        "Current reserve should match target reserve after tick exhaustion"
+                    );
+
+                this.reserve.put(this.currentReserve);
+                this.inventory.notifyReserveChanged();
+            }
+
+            this.cleanup();
+            this.idx.inc();
+
+            const inventoryTick = this.inventory.takeBest(this.idx.clone());
+            if (inventoryTick) this.putInventoryTick(inventoryTick);
+        } else {
+            panic("There is still some inventory left");
+        }
+    }
+
+    /**
+     * Moves to the previous tick.
+     * If the current tick's reserve is exhausted, the remaining inventory is moved to the general inventory
+     * and the AMM attempts to load the next reserve tick.
+     */
+    public decrement() {
+        // if we're swapping in an opposite direction, ask for a new tick
+        if (this.currentReserve === 0) {
+            if (this.currentInventory > 0) {
+                // if the reserve is exhausted, make room for the next tick
+                if (this.currentInventory !== this.targetInventory)
+                    panic(
+                        "Current inventory should match target inventory after tick exhaustion"
+                    );
+
+                this.inventory.putBest({
+                    idx: this.idx.clone(),
+                    inventory: this.currentInventory,
+                });
+            }
+
+            this.cleanup();
+            this.idx.dec();
+
+            const reserveTick = this.reserve.takeBest();
+            if (reserveTick) this.putReserveTick(reserveTick);
+        } else {
+            panic("There is still some reserve left");
+        }
+    }
+
+    /**
+     * Resets the state of the current tick.
+     * This is called when moving to a new tick.
+     */
     private cleanup() {
         this.targetInventory = 0;
         this.targetReserve = 0;
@@ -189,6 +252,11 @@ export class CurrentTick {
         this.currentReserve = 0;
     }
 
+    /**
+     * Puts an inventory tick into the current tick.
+     * This is called when a new inventory tick is loaded.
+     * @param tick The inventory tick to put.
+     */
     private putInventoryTick(tick: InventoryTick) {
         if (tick.idx !== this.idx) panic("Ticks don't match");
 
@@ -198,6 +266,11 @@ export class CurrentTick {
         this.targetReserve = this.targetInventory / this.idx.getPrice();
     }
 
+    /**
+     * Puts a reserve tick into the current tick.
+     * This is called when a new reserve tick is loaded.
+     * @param tick The reserve tick to put.
+     */
     private putReserveTick(tick: ReserveTick) {
         if (tick.idx !== this.idx) panic("Ticks don't match");
 
@@ -207,6 +280,12 @@ export class CurrentTick {
         this.targetInventory = this.targetReserve * this.idx.getPrice();
     }
 
+    /**
+     * Creates a new `CurrentTick`.
+     * @param idx The index of the current tick.
+     * @param reserve The AMM's reserve.
+     * @param inventory The AMM's inventory.
+     */
     constructor(
         private idx: TickIndex,
         private reserve: Reserve,
@@ -227,10 +306,21 @@ export type RecoverResult = {
     recoveredReserve: number;
 };
 
+/**
+ * The `RecoveryBin` is a mechanism to mitigate impermanent loss (IL).
+ * It accumulates fees (collateral) and uses them to buy back the inventory asset at a better price,
+ * effectively recovering the value lost due to price changes.
+ */
 export class RecoveryBin {
     private collateral: number = 0;
     private worstTick: InventoryTick | undefined = undefined;
 
+    /**
+     * Withdraws a portion of the collateral and the worst tick inventory.
+     * This is called when a user withdraws their liquidity from the AMM.
+     * @param cut The percentage of liquidity to withdraw (0 to 1).
+     * @returns The amount of inventory withdrawn from the recovery bin.
+     */
     public withdrawCut(cut: number): number {
         let inventoryToWithdraw = this.collateral * cut;
 
@@ -248,6 +338,16 @@ export class RecoveryBin {
         return inventoryToWithdraw;
     }
 
+    /**
+     * Attempts to recover impermanent loss by using the accumulated fees (collateral)
+     * to buy back a portion of the inventory from the worst tick.
+     *
+     * The formula `dI = min(I, X*P1 / |P1-P0|)` calculates the amount of inventory (`dI`) that can be recovered
+     * at the current price (`P1`) using the available collateral (`X`) and the price of the worst tick (`P0`).
+     *
+     * @param args The recovery arguments, including the amount of reserve being swapped in and the current tick index.
+     * @returns The result of the recovery, including the amount of inventory recovered and any remaining reserve.
+     */
     // only executed if the current swap is 'reserve -> inventory'
     public recover(args: RecoverArgs): RecoverResult {
         // take the worst IL tick
@@ -324,13 +424,26 @@ export class RecoveryBin {
         };
     }
 
+    /**
+     * Adds collateral (fees) to the recovery bin.
+     * @param fees The amount of fees to add.
+     */
     public addCollateral(fees: number) {
         this.collateral += fees;
     }
 
+    /**
+     * Checks if there is any collateral in the recovery bin.
+     * @returns `true` if there is collateral, `false` otherwise.
+     */
     public hasCollateral(): boolean {
         return this.collateral > 0;
     }
 
+    /**
+     * Creates a new `RecoveryBin`.
+     * @param reserve The AMM's reserve.
+     * @param inventory The AMM's inventory.
+     */
     constructor(private reserve: Reserve, private inventory: Inventory) {}
 }

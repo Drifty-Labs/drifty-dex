@@ -2,26 +2,48 @@ import { InventoryRange, ReserveRange } from "./range.ts";
 import { TickIndex } from "./ticks.ts";
 import { panic } from "./utils.ts";
 
+/**
+ * Represents a tick with a certain amount of reserve liquidity.
+ */
 export type ReserveTick = {
+    /** The amount of reserve liquidity. */
     reserve: number;
+    /** The index of the tick. */
     idx: TickIndex;
 };
 
+/**
+ * Manages the reserve liquidity of an AMM.
+ * The reserve is the liquidity that is not currently being used for active trading.
+ * It is stored in a `ReserveRange`, which is a range of ticks with a certain amount of liquidity.
+ */
 export class Reserve {
     private range: ReserveRange | undefined = undefined;
 
+    /**
+     * Withdraws a cut of the reserve liquidity.
+     * @param cut The percentage of the reserve to withdraw (0 to 1).
+     * @returns The amount of reserve withdrawn.
+     */
     public withdrawCut(cut: number): number {
         this.assertInitted();
 
         return this.range!.withdrawCut(cut);
     }
 
+    /**
+     * Gets the width of the reserve range (number of ticks).
+     */
     public get width(): number {
         this.assertInitted();
 
         return this.range!.width;
     }
 
+    /**
+     * Takes the best (closest to the current) tick from the reserve range.
+     * @returns The best reserve tick, or `undefined` if the reserve is not initialized.
+     */
     public takeBest(): ReserveTick | undefined {
         if (!this.isInitted()) return undefined;
 
@@ -33,6 +55,10 @@ export class Reserve {
         };
     }
 
+    /**
+     * Takes the worst (furthest from the current) tick from the reserve range.
+     * @returns The worst reserve tick, or `undefined` if the reserve is not initialized.
+     */
     public takeWorst(): ReserveTick | undefined {
         if (!this.isInitted()) return undefined;
 
@@ -44,17 +70,32 @@ export class Reserve {
         };
     }
 
+    /**
+     * Stretches the reserve range to the current tick.
+     * This is used to expand the range of the reserve to include the current price.
+     * @param curTickIdx The current tick index.
+     */
     public stretchToCurTick(curTickIdx: TickIndex) {
         this.assertInitted();
         this.range!.stretchToRight(curTickIdx);
     }
 
+    /**
+     * Adds liquidity to the reserve range.
+     * @param qty The amount of liquidity to add.
+     */
     public put(qty: number) {
         this.assertInitted();
 
         this.range!.put(qty);
     }
 
+    /**
+     * Initializes the reserve with a given amount of liquidity and range.
+     * @param qty The amount of liquidity.
+     * @param left The left (lowest price) tick of the range.
+     * @param right The right (highest price) tick of the range.
+     */
     public init(qty: number, left: TickIndex, right: TickIndex) {
         this.assertNotInitted();
 
@@ -69,26 +110,57 @@ export class Reserve {
         if (this.isInitted()) panic("The reserve is already initted");
     }
 
+    /**
+     * Checks if the reserve has been initialized.
+     * @returns `true` if the reserve is initialized, `false` otherwise.
+     */
     public isInitted() {
         return this.range !== undefined;
     }
 }
 
+/**
+ * Represents a tick with a certain amount of inventory liquidity.
+ */
 export type InventoryTick = {
+    /** The amount of inventory liquidity. */
     inventory: number;
+    /** The index of the tick. */
     idx: TickIndex;
 };
 
+/**
+ * Manages the inventory liquidity of an AMM.
+ * The inventory is the liquidity that has been acquired through swaps and is now held by the AMM.
+ * It is stored in a series of `InventoryRange`s, which represent concentrated liquidity positions.
+ */
 export class Inventory {
     private respectiveReserve: number = 0;
     private allocatedQty: number = 0;
     private shouldSpawnNew: boolean = true;
     private ranges: InventoryRange[] = [];
 
+    /**
+     * Gets the total amount of reserve that was spent to acquire the current inventory.
+     * @returns The respective reserve amount.
+     */
     public getRespectiveReserve() {
         return this.respectiveReserve;
     }
 
+    /**
+     * Gets the total quantity of inventory held by the AMM.
+     * @returns The total inventory quantity.
+     */
+    public qty() {
+        return this.allocatedQty;
+    }
+
+    /**
+     * Takes the best (highest price) inventory tick that matches the current tick.
+     * @param curTickIdx The current tick index.
+     * @returns The best inventory tick, or `undefined` if no matching tick is found.
+     */
     public takeBest(curTickIdx: TickIndex): InventoryTick | undefined {
         if (this.isEmpty()) return undefined;
 
@@ -118,6 +190,10 @@ export class Inventory {
         };
     }
 
+    /**
+     * Takes the worst (lowest price) inventory tick from the inventory.
+     * @returns The worst inventory tick, or `undefined` if the inventory is empty.
+     */
     public takeWorst(): InventoryTick | undefined {
         if (this.isEmpty()) return undefined;
 
@@ -139,6 +215,10 @@ export class Inventory {
         };
     }
 
+    /**
+     * Adds a new inventory range for the worst (lowest price) tick.
+     * @param tick The inventory tick to add.
+     */
     public putWorstNewRange(tick: InventoryTick) {
         this.respectiveReserve += tick.inventory / tick.idx.getPrice();
         this.allocatedQty += tick.inventory;
@@ -153,6 +233,11 @@ export class Inventory {
         return;
     }
 
+    /**
+     * Adds an inventory tick to the best (highest price) range.
+     * If `shouldSpawnNew` is true, a new range is created.
+     * @param tick The inventory tick to add.
+     */
     public putBest(tick: InventoryTick) {
         this.respectiveReserve += tick.inventory / tick.idx.getPrice();
         this.allocatedQty += tick.inventory;
@@ -176,6 +261,10 @@ export class Inventory {
         range.putBest(tick.inventory, tick.idx);
     }
 
+    /**
+     * Checks if the inventory is empty.
+     * @returns `true` if the inventory is empty, `false` otherwise.
+     */
     public isEmpty() {
         return this.ranges.length === 0;
     }
@@ -184,6 +273,10 @@ export class Inventory {
         if (this.isEmpty()) panic("The inventory is empty");
     }
 
+    /**
+     * Notifies the inventory that the reserve has changed.
+     * This typically triggers the creation of a new inventory range on the next `putBest` call.
+     */
     public notifyReserveChanged() {
         this.shouldSpawnNew = true;
     }
