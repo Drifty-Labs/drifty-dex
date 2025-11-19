@@ -32,7 +32,31 @@ export type SwapResult = {
  */
 export class Pool {
     private stableAMM: TwoSided<AMM>;
-    private driftingAMM: TwoSided<AMM>; // TODO: make drifting AMM actually drift
+    private driftingAMM: TwoSided<AMM>;
+
+    /**
+     * Rebases the drifting AMMs to match the opposite side's inventory.
+     * This should be called periodically by an external keeper.
+     */
+    public rebase() {
+        const baseWorst = this.driftingAMM.base.getWorstInventoryTick();
+        const quoteWorst = this.driftingAMM.quote.getWorstInventoryTick();
+
+        // For base drifting AMM, left bound is opposite (quote) worst inventory tick
+        // If no inventory, default to min()
+        // Quote is Positive, Base is Negated. So we must Negate Quote index to get Base Target.
+        const baseTarget = quoteWorst
+            ? new TickIndex(false, -quoteWorst.idx.index())
+            : this.driftingAMM.base.curTick().index().min();
+        this.driftingAMM.base.rebase(baseTarget);
+
+        // For quote drifting AMM, left bound is opposite (base) worst inventory tick
+        // Base is Negated, Quote is Positive. So we must Negate Base index to get Quote Target.
+        const quoteTarget = baseWorst
+            ? new TickIndex(false, -baseWorst.idx.index())
+            : this.driftingAMM.quote.curTick().index().min();
+        this.driftingAMM.quote.rebase(quoteTarget);
+    }
 
     /**
      * Calculates the average impermanent loss (IL) across all AMMs in the pool.
@@ -119,7 +143,13 @@ export class Pool {
         const driftingCut = qty - stableCut;
 
         this.stableAMM[side].deposit({ reserve: stableCut });
-        this.driftingAMM[side].deposit({ reserve: driftingCut });
+
+        const oppositeSide = side === "base" ? "quote" : "base";
+        const worstInventory =
+            this.driftingAMM[oppositeSide].getWorstInventoryTick();
+        const leftBound = worstInventory ? worstInventory.idx : undefined;
+
+        this.driftingAMM[side].deposit({ reserve: driftingCut, leftBound });
     }
 
     /**
@@ -151,15 +181,18 @@ export class Pool {
     private _swap(qtyIn: number, direction: SwapDirection): number {
         let qtyOut = 0;
 
+        // For "base -> quote" swap: user gives base, receives quote
+        // - Base AMM receives Base (Reserve) → "reserve -> inventory"
+        // - Quote AMM receives Base (Inventory) → "inventory -> reserve"
         const baseDirection: AMMSwapDirection =
             direction === "base -> quote"
                 ? "reserve -> inventory"
                 : "inventory -> reserve";
 
         const quoteDirection: AMMSwapDirection =
-            direction === "quote -> base"
-                ? "reserve -> inventory"
-                : "inventory -> reserve";
+            direction === "base -> quote"
+                ? "inventory -> reserve"
+                : "reserve -> inventory";
 
         const amms: [AMM, AMMSwapDirection][] = [
             [this.stableAMM.base, baseDirection],
@@ -168,50 +201,104 @@ export class Pool {
             [this.driftingAMM.quote, quoteDirection],
         ];
 
-        while (true) {
+        while (qtyIn > 0) {
             let hasAny = false;
 
+            // Keep swapping with each AMM until it's fully exhausted
             for (const [amm, direction] of amms) {
-                const { qtyOut: q, reminderIn } = amm.curTick().swap({
-                    direction,
-                    qtyIn,
-                });
+                while (qtyIn > 0) {
+                    const { qtyOut: q, reminderIn } = amm.curTick().swap({
+                        direction,
+                        qtyIn,
+                    });
 
-                if (reminderIn < qtyIn) {
-                    hasAny = true;
+                    if (reminderIn < qtyIn) {
+                        hasAny = true;
+                        qtyIn = reminderIn;
+                        qtyOut += q;
+                    } else {
+                        // This AMM can't provide anything, move to next
+                        break;
+                    }
                 }
-
-                qtyIn = reminderIn;
-                qtyOut += q;
-
+                
                 if (qtyIn === 0) return qtyOut;
             }
 
-            if (!hasAny) {
-                if (baseDirection === "reserve -> inventory") {
-                    this.stableAMM.base.curTick().increment();
-                    this.stableAMM.quote.curTick().decrement();
+            // Check if we should move ticks
+            // We can only move if ALL AMMs have exhausted the asset they PROVIDE
+            if (!hasAny && qtyIn > 0) {
+                // Verify AMMs are truly exhausted of what they provide
+                let canMove = true;
+                
+                for (const [amm, dir] of amms) {
+                    const curTick = amm.curTick();
+                    
+                    // Check what asset this AMM PROVIDES (not consumes!)
+                    if (dir === "reserve -> inventory") {
+                        // Consumes reserve, PROVIDES inventory
+                        if (curTick.hasInventory()) {
+                            console.log(`Cannot move: AMM (${dir}) still has inventory to provide`);
+                            canMove = false;
+                            break;
+                        }
+                    } else {
+                        // Consumes inventory, PROVIDES reserve
+                        if (curTick.hasReserve()) {
+                            console.log(`Cannot move: AMM (${dir}) still has reserve to provide`);
+                            canMove = false;
+                            break;
+                        }
+                    }
+                }
+                
+                if (!canMove) {
+                    // AMMs still have assets but swap() returned no progress
+                    // This might be due to price limits or IL recovery
+                    // For now, break to avoid infinite loop
+                    console.log("Breaking: AMMs have assets but no progress made");
+                    break;
+                }
+                
 
-                    this.driftingAMM.base.curTick().increment();
-                    this.driftingAMM.quote.curTick().decrement();
+                
+                // Move ALL AMMs together, passing their individual swap directions
+                if (direction === "quote -> base") {
+                    // Price UP: 
+                    // - Base (Negated): Move Left (Reserve) -> dec() (-101 -> -102)
+                    // - Quote (Normal): Move Right (Inventory) -> inc() (99 -> 100)
+                    this.stableAMM.base.curTick().decrement(baseDirection);
+                    this.stableAMM.quote.curTick().increment(quoteDirection);
+
+                    this.driftingAMM.base.curTick().decrement(baseDirection);
+                    this.driftingAMM.quote.curTick().increment(quoteDirection);
                 } else {
-                    this.stableAMM.base.curTick().decrement();
-                    this.stableAMM.quote.curTick().increment();
+                    // Price DOWN:
+                    // - Base (Negated): Move Right (Inventory) -> inc() (-101 -> -100)
+                    // - Quote (Normal): Move Left (Reserve) -> dec() (100 -> 99)
+                    this.stableAMM.base.curTick().increment(baseDirection);
+                    this.stableAMM.quote.curTick().decrement(quoteDirection);
 
-                    this.driftingAMM.base.curTick().decrement();
-                    this.driftingAMM.quote.curTick().increment();
+                    this.driftingAMM.base.curTick().increment(baseDirection);
+                    this.driftingAMM.quote.curTick().decrement(quoteDirection);
                 }
 
                 const indices = amms.map(([it, _]) =>
-                    it.curTick().index().toAbsolute()
+                    Math.abs(it.curTick().index().index())
                 );
-                if (!indices.every((it) => it === indices[0])) {
+                const allSame = indices.every((idx) => idx === indices[0]);
+                if (!allSame) {
                     panic(
-                        "After tick move some ticks are different, while should be the same!"
+                        `After tick move some ticks are different, while should be the same! ${indices}`
                     );
                 }
+            } else if (!hasAny) {
+                // No progress and no qty left - swap complete (shouldn't happen)
+                break;
             }
         }
+
+        return qtyOut;
     }
 
     /**
@@ -219,13 +306,17 @@ export class Pool {
      * @param curTickIdx The initial tick index for the pool.
      */
     constructor(curTickIdx: number) {
-        const baseTickIdx = new TickIndex(false, curTickIdx);
-        const quoteTickIdx = baseTickIdx.clone(true);
+        const baseTickIdx = new TickIndex(false, -curTickIdx); // Base Normal (Negated)
+        const quoteTickIdx = new TickIndex(false, curTickIdx); // Quote Normal
 
-        this.stableAMM = twoSided(new AMM(baseTickIdx), new AMM(quoteTickIdx));
-        this.driftingAMM = twoSided(
-            new AMM(baseTickIdx),
-            new AMM(quoteTickIdx)
-        );
+        this.stableAMM = {
+            base: new AMM(baseTickIdx),
+            quote: new AMM(quoteTickIdx),
+        };
+
+        this.driftingAMM = {
+            base: new AMM(baseTickIdx),
+            quote: new AMM(quoteTickIdx),
+        };
     }
 }

@@ -114,6 +114,26 @@ export class ReserveRange extends Range {
 
         this.right = newRight.clone();
     }
+    public setLeft(newLeft: TickIndex) {
+        this.assertNonEmpty();
+
+        if (newLeft.lt(this.left))
+            panic(
+                `New left ${newLeft.index()} should be bigger than old left ${this.left.index()}`
+            );
+
+        if (newLeft.gt(this.right))
+            panic(
+                `New left ${newLeft.index()} should be smaller than right ${this.right.index()}`
+            );
+
+        this.left = newLeft.clone();
+    }
+
+    public getLeft(): TickIndex {
+        this.assertNonEmpty();
+        return this.left.clone();
+    }
 }
 
 /**
@@ -166,6 +186,15 @@ export class InventoryRange extends Range {
 
         const tick = this.right.clone();
         this.right.dec();
+
+        return { qty, tickIdx: tick };
+    }
+
+    public peekWorst(): TakeResult {
+        this.assertNonEmpty();
+
+        const qty = this.worstTickQty();
+        const tick = this.right.clone();
 
         return { qty, tickIdx: tick };
     }

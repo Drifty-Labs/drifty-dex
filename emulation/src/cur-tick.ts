@@ -74,7 +74,7 @@ export class CurrentTick {
                     reminderIn: 0,
                 };
             }
-
+            
             if (this.currentInventory === 0)
                 return { qtyOut: inventoryOut, reminderIn: reminderReserveIn };
 
@@ -168,10 +168,6 @@ export class CurrentTick {
         return this.idx.clone();
     }
 
-    public hasReserve() {
-        return this.currentReserve > 0;
-    }
-
     public hasInventory() {
         return this.currentInventory > 0;
     }
@@ -180,55 +176,90 @@ export class CurrentTick {
      * Moves to the next tick when inventory is exhausted. Any leftover reserve
      * is pushed back into the global reserve book before requesting the next
      * best inventory tick.
+     * @param direction The swap direction for this AMM (context for validation)
      */
-    public increment() {
-        if (this.currentInventory === 0) {
-            if (this.currentReserve > 0) {
-                if (this.currentReserve !== this.targetReserve)
-                    panic(
-                        "Current reserve should match target reserve after tick exhaustion"
-                    );
-
-                this.reserve.put(this.currentReserve);
-                this.inventory.notifyReserveChanged();
-            }
-
-            this.cleanup();
-            this.idx.inc();
-
-            const inventoryTick = this.inventory.takeBest(this.idx.clone());
-            if (inventoryTick) this.putInventoryTick(inventoryTick);
-        } else {
-            panic("There is still some inventory left");
+    public increment(direction: AMMSwapDirection) {
+        // Moving RIGHT (towards inventory)
+        // If we're selling reserve (reserve -> inventory), we're moving away from reserve
+        // We should have consumed inventory at current tick first
+        if (direction === "reserve -> inventory" && this.currentInventory > 0) {
+            panic("There is still some inventory left - must consume before moving");
         }
+        
+        // If we're buying reserve (inventory -> reserve), we're moving into inventory
+        // We should have consumed reserve at current tick first
+        if (direction === "inventory -> reserve" && this.currentReserve > 0) {
+            panic("There is still some reserve left - must consume before moving");
+        }
+
+        if (this.currentReserve > 0) {
+            if (this.currentReserve !== this.targetReserve)
+                panic(
+                    "Current reserve should match target reserve after tick exhaustion"
+                );
+
+            this.reserve.stretchToCurTick(this.idx);
+            this.reserve.put(this.currentReserve);
+            this.inventory.notifyReserveChanged();
+        }
+
+        this.cleanup();
+        this.idx.inc();
+
+        const inventoryTick = this.inventory.takeBest(this.idx.clone());
+        if (inventoryTick) this.putInventoryTick(inventoryTick);
     }
 
     /**
-     * Moves to the previous tick when reserve is exhausted. Any leftover
-     * inventory is pushed back so the next swap direction can consume it.
+     * Checks if this tick has any reserve available.
+     * Used to determine when to move ticks during swaps.
      */
-    public decrement() {
-        if (this.currentReserve === 0) {
-            if (this.currentInventory > 0) {
-                if (this.currentInventory !== this.targetInventory)
-                    panic(
-                        "Current inventory should match target inventory after tick exhaustion"
-                    );
+    public hasReserve(): boolean {
+        return this.currentReserve > 0;
+    }
 
-                this.inventory.putBest({
-                    idx: this.idx.clone(),
-                    inventory: this.currentInventory,
-                });
-            }
-
-            this.cleanup();
-            this.idx.dec();
-
-            const reserveTick = this.reserve.takeBest();
-            if (reserveTick) this.putReserveTick(reserveTick);
-        } else {
-            panic("There is still some reserve left");
+    /**
+     * Moves to the previous tick when moving towards reserve.
+     * @param direction The swap direction for this AMM (context for validation)
+     */
+    public decrement(direction: AMMSwapDirection) {
+        // Moving LEFT (towards reserve)
+        
+        // If we're selling reserve (reserve -> inventory), we're consuming INVENTORY
+        // We should have consumed inventory at current tick first
+        if (direction === "reserve -> inventory" && this.currentInventory > 0) {
+            panic("There is still some inventory left - must consume before moving");
         }
+        
+        // If we're buying reserve (inventory -> reserve), we're consuming RESERVE
+        // We should have consumed current reserve before needing more
+        if (direction === "inventory -> reserve" && this.currentReserve > 0) {
+            panic("There is still some reserve left - must consume before moving");
+        }
+        
+        // Save any remaining inventory (accumulated or unused)
+        if (this.currentInventory > 0) {
+            this.inventory.putBest({
+                idx: this.idx.clone(),
+                inventory: this.currentInventory,
+            });
+        } else {
+            this.inventory.notifyReserveChanged();
+        }
+
+        // Save any remaining reserve (accumulated)
+        // Note: We don't stretchToCurTick because we are moving INTO reserve (left)
+        // The reserve range right edge is already at curTick - 1 (or should be)
+        // We just put the amount back into the pool
+        if (this.currentReserve > 0) {
+            this.reserve.put(this.currentReserve);
+        }
+
+        this.cleanup();
+        this.idx.dec();
+
+        const reserveTick = this.reserve.takeBest();
+        if (reserveTick) this.putReserveTick(reserveTick);
     }
 
     /**
@@ -252,7 +283,7 @@ export class CurrentTick {
     }
 
     private putReserveTick(tick: ReserveTick) {
-        if (tick.idx !== this.idx) panic("Ticks don't match");
+        if (tick.idx.index() !== this.idx.index()) panic("Ticks don't match");
 
         this.targetReserve += tick.reserve;
         this.currentReserve += tick.reserve;

@@ -116,6 +116,24 @@ export class Reserve {
     public isInitted() {
         return this.range !== undefined;
     }
+
+    /**
+     * Rebases the reserve range to a new left bound.
+     * @param newLeft The new left bound.
+     */
+    public rebase(newLeft: TickIndex) {
+        this.assertInitted();
+        this.range!.setLeft(newLeft);
+    }
+
+    /**
+     * Gets the left bound of the reserve range.
+     * @returns The left bound tick index.
+     */
+    public getLeft(): TickIndex {
+        this.assertInitted();
+        return this.range!.getLeft();
+    }
 }
 
 /**
@@ -208,6 +226,22 @@ export class Inventory {
 
         const unusedReserve = result.qty / result.tickIdx.getPrice();
         this.respectiveReserve -= unusedReserve;
+
+        return {
+            inventory: result.qty,
+            idx: result.tickIdx,
+        };
+    }
+
+    /**
+     * Peeks at the worst (lowest price) inventory tick without removing it.
+     * @returns The worst inventory tick, or `undefined` if the inventory is empty.
+     */
+    public peekWorst(): InventoryTick | undefined {
+        if (this.isEmpty()) return undefined;
+
+        const range = this.ranges[this.ranges.length - 1];
+        const result = range.peekWorst();
 
         return {
             inventory: result.qty,

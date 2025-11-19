@@ -9,6 +9,11 @@ import { panic } from "./utils.ts";
 export type DepositArgs = {
     /** The amount of reserve to deposit. */
     reserve: number;
+    /**
+     * Optional left bound for the reserve range.
+     * If provided, it overrides the default behavior (min tick).
+     */
+    leftBound?: TickIndex;
 };
 
 /**
@@ -100,8 +105,12 @@ export class AMM {
     public deposit(args: DepositArgs): void {
         if (!this.reserve.isInitted()) {
             const curTick = this.currentTick.index();
+            const leftBound = args.leftBound || curTick.min();
 
-            this.reserve.init(args.reserve, curTick.min(), curTick.clone());
+            const rightBound = curTick.clone();
+            rightBound.dec();
+
+            this.reserve.init(args.reserve, leftBound, rightBound);
         } else {
             const fullWidth = this.reserve.width + 1;
             const addToReserve =
@@ -200,13 +209,67 @@ export class AMM {
     }
 
     /**
+     * Gets the worst (lowest price) inventory tick from the AMM.
+     * @returns The worst inventory tick, or `undefined` if the inventory is empty.
+     */
+    public getWorstInventoryTick() {
+        return this.inventory.peekWorst();
+    }
+
+    /**
+     * Rebases the AMM's reserve range to a new left bound based on the target.
+     * Drifts logarithmically: newLeft = currentLeft + (targetLeft - currentLeft) / 2.
+     * @param targetLeft The target left bound (e.g. opposite worst inventory tick).
+     */
+    public rebase(targetLeft: TickIndex) {
+        if (!this.reserve.isInitted()) return;
+
+        const currentLeft = this.reserve.getLeft();
+
+        // If target is to the left of current, we don't drift back (we only concentrate)
+        // Or do we? The requirement says "drifting AMM is expected to follow the rules... left bound equals opposite worst inventory tick"
+        // But the user said "drifting logarithmically - halving the distance".
+        // Usually drifting means moving towards the price (concentrating).
+        // If the opposite inventory moves away (e.g. price moves away), should we expand?
+        // "RecoveryBin-first swap logic... immediately uses fees and deepest underwater ticks to heal IL."
+        // Drifting is about "concentrating liquidity (drifting) where it’s most useful."
+        // So it should likely only move forward (towards price).
+        // But let's stick to the formula: halve the distance.
+
+        // If targetLeft > currentLeft (target is to the right, closer to price), we move right.
+        // If targetLeft < currentLeft (target is to the left, further from price), we move left?
+        // "concentrating liquidity" implies narrowing the range.
+        // If we move left, we widen the range (assuming right bound is fixed at current tick).
+        // Wait, right bound is fixed at current tick?
+        // "reserve window always spans from the current tick back to the opposite side’s worst inventory tick"
+        // So if opposite worst inventory tick moves left (more IL), we should expand?
+        // User said: "halving the distance between out worst reserve tick and the opposite worst inventory tick."
+        // So we just move towards the target.
+
+        const distance = currentLeft.distance(targetLeft);
+        if (distance === 0) return;
+
+        const moveBy = Math.floor(distance / 2);
+        if (moveBy === 0) return;
+
+        const newLeft = currentLeft.clone();
+        if (targetLeft.gt(currentLeft)) {
+            newLeft.add(moveBy);
+        } else {
+            newLeft.add(-moveBy);
+        }
+
+        this.reserve.rebase(newLeft);
+    }
+
+    /**
      * Creates a new AMM bound to a starting tick index. The tick orientation is
      * already encoded inside {@link TickIndex} so the same code path works for
      * base and quote sides.
      */
     constructor(curTickIdx: TickIndex) {
         this.currentTick = new CurrentTick(
-            curTickIdx,
+            curTickIdx.clone(),
             this.reserve,
             this.inventory
         );

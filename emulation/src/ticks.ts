@@ -22,7 +22,10 @@ export class TickIndexFactory {
      * @returns A new `TickIndex` instance.
      */
     public min(): TickIndex {
-        return new TickIndex(this.isInverted, MIN_TICK);
+        return new TickIndex(
+            this.isInverted,
+            this.isInverted ? MAX_TICK : MIN_TICK
+        );
     }
 
     /**
@@ -30,7 +33,10 @@ export class TickIndexFactory {
      * @returns A new `TickIndex` instance.
      */
     public max(): TickIndex {
-        return new TickIndex(this.isInverted, MAX_TICK);
+        return new TickIndex(
+            this.isInverted,
+            this.isInverted ? MIN_TICK : MAX_TICK
+        );
     }
 }
 
@@ -47,10 +53,12 @@ export class TickIndexFactory {
 export class TickIndex {
     /**
      * Clones the tick index, optionally flipping its orientation. Handy when we
-     * need the “mirror” tick for the opposite AMM side.
+     * need the "mirror" tick for the opposite AMM side.
      * @param invert If `true`, the new tick index will have the opposite orientation.
      */
     public clone(invert?: boolean): TickIndex {
+        // Option 2: Flip orientation but keep same raw index
+        // This ensures both have same toAbsolute() value
         return new TickIndex(
             invert ? !this.isInverted : this.isInverted,
             this.idx
@@ -62,7 +70,10 @@ export class TickIndex {
      * @returns A new `TickIndex` instance.
      */
     public min(): TickIndex {
-        return new TickIndex(this.isInverted, MIN_TICK);
+        return new TickIndex(
+            this.isInverted,
+            this.isInverted ? MAX_TICK : MIN_TICK
+        );
     }
 
     /**
@@ -104,7 +115,7 @@ export class TickIndex {
     public lt(to: TickIndex): boolean {
         this.assertSameOrientation(to);
 
-        return this.idx < to.idx;
+        return this.isInverted ? this.idx > to.idx : this.idx < to.idx;
     }
 
     /**
@@ -115,7 +126,7 @@ export class TickIndex {
     public le(to: TickIndex): boolean {
         this.assertSameOrientation(to);
 
-        return this.idx <= to.idx;
+        return this.isInverted ? this.idx >= to.idx : this.idx <= to.idx;
     }
 
     /**
@@ -126,7 +137,7 @@ export class TickIndex {
     public gt(to: TickIndex): boolean {
         this.assertSameOrientation(to);
 
-        return this.idx > to.idx;
+        return this.isInverted ? this.idx < to.idx : this.idx > to.idx;
     }
 
     /**
@@ -137,32 +148,39 @@ export class TickIndex {
     public ge(to: TickIndex): boolean {
         this.assertSameOrientation(to);
 
-        return this.idx >= to.idx;
+        return this.isInverted ? this.idx <= to.idx : this.idx >= to.idx;
     }
 
     /** Moves one tick to the right (higher price for inventory). */
     public inc() {
-        if (this.isInverted) this.idx -= 1;
-        else this.idx += 1;
+        this.idx += this.isInverted ? -1 : 1;
+        this.assertInRange();
+    }
 
+    /**
+     * Adds a specified amount to the tick index.
+     * Positive values move right, negative values move left.
+     * @param amount The amount to add to the tick index.
+     */
+    public add(amount: number) {
+        this.idx += this.isInverted ? -amount : amount;
         this.assertInRange();
     }
 
     /** Moves one tick to the left (higher price for reserve). */
     public dec() {
-        if (this.isInverted) this.idx += 1;
-        else this.idx -= 1;
-
+        this.idx -= this.isInverted ? -1 : 1;
         this.assertInRange();
     }
 
     /**
      * Converts the tick index to its absolute value.
-     * This is used for price calculations, as the price is always positive.
+     * For synchronized pricing, both inverted and non-inverted return raw index.
+     * The orientation is handled by inc/dec logic, not toAbsolute.
      * @returns The absolute tick index.
      */
     public toAbsolute(): number {
-        return this.isInverted ? -this.idx : this.idx;
+        return this.idx;
     }
 
     /**
