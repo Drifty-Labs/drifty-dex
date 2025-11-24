@@ -41,13 +41,44 @@ export class Reserve {
     }
 
     /**
+     * Gets the total quantity of liquidity in the reserve.
+     */
+    public get qty(): number {
+        this.assertInitted();
+
+        return this.range!.getQty();
+    }
+
+    /**
      * Takes the best (closest to the current) tick from the reserve range.
+     * @param curTickIdx The current tick index.
      * @returns The best reserve tick, or `undefined` if the reserve is not initialized.
      */
-    public takeBest(): ReserveTick | undefined {
+    public takeBest(curTickIdx: TickIndex): ReserveTick | undefined {
         if (!this.isInitted()) return undefined;
 
+        const bestTick = this.range!.peekBest();
+        
+        if (!bestTick.tickIdx.eq(curTickIdx)) {
+            return undefined;
+        }
+
         const result = this.range!.takeBest();
+
+        return {
+            reserve: result.qty,
+            idx: result.tickIdx,
+        };
+    }
+
+    /**
+     * Peeks at the best (closest to the current) tick from the reserve range.
+     * @returns The best reserve tick, or `undefined` if the reserve is not initialized.
+     */
+    public peekBest(): ReserveTick | undefined {
+        if (!this.isInitted()) return undefined;
+
+        const result = this.range!.peekBest();
 
         return {
             reserve: result.qty,
@@ -63,6 +94,21 @@ export class Reserve {
         if (!this.isInitted()) return undefined;
 
         const result = this.range!.takeWorst();
+
+        return {
+            reserve: result.qty,
+            idx: result.tickIdx,
+        };
+    }
+
+    /**
+     * Peeks at the worst (furthest from the current) tick from the reserve range.
+     * @returns The worst reserve tick, or `undefined` if the reserve is not initialized.
+     */
+    public peekWorst(): ReserveTick | undefined {
+        if (!this.isInitted()) return undefined;
+
+        const result = this.range!.peekWorst();
 
         return {
             reserve: result.qty,
@@ -186,7 +232,8 @@ export class Inventory {
 
         // IL ranges can have voids in between
         // check if the best is the same as the provided one, otherwise return undefined
-        const bestTickIdx = range.betTickIdx();
+        const bestTickIdx = range.bestTickIdx();
+
         if (!bestTickIdx.eq(curTickIdx)) {
             return undefined;
         }
@@ -201,6 +248,22 @@ export class Inventory {
 
         const unusedReserve = result.qty / result.tickIdx.getPrice();
         this.respectiveReserve -= unusedReserve;
+
+        return {
+            inventory: result.qty,
+            idx: result.tickIdx,
+        };
+    }
+
+    /**
+     * Peeks at the best (highest price) inventory tick without removing it.
+     * @returns The best inventory tick, or `undefined` if the inventory is empty.
+     */
+    public peekBest(): InventoryTick | undefined {
+        if (this.isEmpty()) return undefined;
+
+        const range = this.ranges[0];
+        const result = range.peekBest();
 
         return {
             inventory: result.qty,
@@ -254,6 +317,14 @@ export class Inventory {
      * @param tick The inventory tick to add.
      */
     public putWorstNewRange(tick: InventoryTick) {
+        // Invariant: New worst must be strictly greater (further right) than current worst
+        if (!this.isEmpty()) {
+            const currentWorst = this.peekWorst();
+            if (currentWorst && !tick.idx.gt(currentWorst.idx)) {
+                panic(`Inventory invariant violated: New worst tick ${tick.idx.index()} must be greater than current worst ${currentWorst.idx.index()}`);
+            }
+        }
+
         this.respectiveReserve += tick.inventory / tick.idx.getPrice();
         this.allocatedQty += tick.inventory;
 
@@ -273,6 +344,31 @@ export class Inventory {
      * @param tick The inventory tick to add.
      */
     public putBest(tick: InventoryTick) {
+        // Invariant: New best must be strictly less (further left) than current best
+        // if we are NOT spawning a new range (i.e., we are extending the current best range).
+        // If we ARE spawning a new range, it must still be "better" (closer to price/lower index) than the old best.
+        // Actually, `putBest` is used when we move Left (Price Decreases).
+        // We put ticks that are now to the Right of Price.
+        // The ticks we put are progressively Lower (101, 100, 99...).
+        // So the new tick should be LESS than the previous best?
+        // Wait. Inventory is Right of Price.
+        // Best = Lowest Index (Closest to Price).
+        // If we put 101, then 100. 100 < 101.
+        // So new tick < current best.
+        
+        if (!this.isEmpty()) {
+            // We need to peek the current best to check.
+            // But we don't have a cheap peekBest across all ranges easily exposed?
+            // ranges[0] is the best range.
+            const bestRange = this.ranges[0];
+            // bestTickIdx() returns the lowest index (Best).
+            const currentBestIdx = bestRange.bestTickIdx();
+            
+            if (!tick.idx.lt(currentBestIdx)) {
+                 panic(`Inventory invariant violated: New best tick ${tick.idx.index()} must be less than current best ${currentBestIdx.index()}`);
+            }
+        }
+
         this.respectiveReserve += tick.inventory / tick.idx.getPrice();
         this.allocatedQty += tick.inventory;
 

@@ -184,15 +184,22 @@ export class Pool {
         // For "base -> quote" swap: user gives base, receives quote
         // - Base AMM receives Base (Reserve) → "reserve -> inventory"
         // - Quote AMM receives Base (Inventory) → "inventory -> reserve"
-        const baseDirection: AMMSwapDirection =
-            direction === "base -> quote"
-                ? "reserve -> inventory"
-                : "inventory -> reserve";
+        let baseDirection: AMMSwapDirection;
+        let quoteDirection: AMMSwapDirection;
 
-        const quoteDirection: AMMSwapDirection =
-            direction === "base -> quote"
-                ? "inventory -> reserve"
-                : "reserve -> inventory";
+        if (direction === "base -> quote") {
+            // User sells Base (Reserve) -> AMM buys Base (Reserve)
+            // Base AMM: Reserve -> Inventory (Receives Reserve, Pays Inventory)
+            baseDirection = "reserve -> inventory";
+            // Quote AMM: Inventory -> Reserve (Receives Inventory, Pays Reserve)
+            quoteDirection = "inventory -> reserve";
+        } else {
+            // User sells Quote (Reserve) -> AMM buys Quote (Reserve)
+            // Base AMM: Inventory -> Reserve (Receives Inventory, Pays Reserve)
+            baseDirection = "inventory -> reserve";
+            // Quote AMM: Reserve -> Inventory (Receives Reserve, Pays Reserve)
+            quoteDirection = "reserve -> inventory";
+        }
 
         const amms: [AMM, AMMSwapDirection][] = [
             [this.stableAMM.base, baseDirection],
@@ -263,18 +270,19 @@ export class Pool {
 
                 
                 // Move ALL AMMs together, passing their individual swap directions
+                // Move ALL AMMs together, passing their individual swap directions
                 if (direction === "quote -> base") {
-                    // Price UP: 
-                    // - Base (Negated): Move Left (Reserve) -> dec() (-101 -> -102)
-                    // - Quote (Normal): Move Right (Inventory) -> inc() (99 -> 100)
+                    // Price UP (Buy Base):
+                    // - Base (Inverted): Move Left (Reserve) -> dec() (-100 -> -101 -> Absolute 101)
+                    // - Quote (Normal): Move Right (Inventory) -> inc() (100 -> 101)
                     this.stableAMM.base.curTick().decrement(baseDirection);
                     this.stableAMM.quote.curTick().increment(quoteDirection);
 
                     this.driftingAMM.base.curTick().decrement(baseDirection);
                     this.driftingAMM.quote.curTick().increment(quoteDirection);
                 } else {
-                    // Price DOWN:
-                    // - Base (Negated): Move Right (Inventory) -> inc() (-101 -> -100)
+                    // Price DOWN (Sell Base):
+                    // - Base (Inverted): Move Right (Inventory) -> inc() (-100 -> -99 -> Absolute 99)
                     // - Quote (Normal): Move Left (Reserve) -> dec() (100 -> 99)
                     this.stableAMM.base.curTick().increment(baseDirection);
                     this.stableAMM.quote.curTick().decrement(quoteDirection);
@@ -306,8 +314,11 @@ export class Pool {
      * @param curTickIdx The initial tick index for the pool.
      */
     constructor(curTickIdx: number) {
-        const baseTickIdx = new TickIndex(false, -curTickIdx); // Base Normal (Negated)
-        const quoteTickIdx = new TickIndex(false, curTickIdx); // Quote Normal
+        // Base is Inverted (Relative = -Absolute)
+        const baseTickIdx = new TickIndex(true, -curTickIdx); 
+        // Quote is Normal (Relative = Absolute)
+        const quoteTickIdx = new TickIndex(false, curTickIdx); 
+
 
         this.stableAMM = {
             base: new AMM(baseTickIdx),

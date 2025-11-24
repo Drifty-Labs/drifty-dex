@@ -34,6 +34,10 @@ export abstract class Range {
         return this.right.distance(this.left) + 1;
     }
 
+    public getQty() {
+        return this.qty;
+    }
+
     public isEmpty() {
         const empty = this.width <= 0;
         if (empty && this.qty > 0)
@@ -65,9 +69,11 @@ export class ReserveRange extends Range {
             );
 
         super(qty, left, right);
+        console.log(`ReserveRange created: qty=${qty}, left=${left.index()}, right=${right.index()}, width=${this.width}`);
     }
 
     public put(qty: number) {
+        this.assertNonEmpty();
         this.qty += qty;
     }
 
@@ -81,6 +87,7 @@ export class ReserveRange extends Range {
     }
 
     public override takeBest(): TakeResult {
+        // console.log(`ReserveRange.takeBest: qty=${this.qty}, width=${this.width}, right=${this.right.index()}`);
         this.assertNonEmpty();
 
         const qty = this.qty / this.width;
@@ -92,6 +99,15 @@ export class ReserveRange extends Range {
         return { qty, tickIdx: tick };
     }
 
+    public peekBest(): TakeResult {
+        this.assertNonEmpty();
+        
+        const qty = this.qty / this.width;
+        const tick = this.right.clone();
+        
+        return { qty, tickIdx: tick };
+    }
+
     public override takeWorst(): TakeResult {
         this.assertNonEmpty();
 
@@ -100,6 +116,15 @@ export class ReserveRange extends Range {
 
         const tick = this.left.clone();
         this.left.inc();
+
+        return { qty, tickIdx: tick };
+    }
+
+    public peekWorst(): TakeResult {
+        this.assertNonEmpty();
+
+        const qty = this.qty / this.width;
+        const tick = this.left.clone();
 
         return { qty, tickIdx: tick };
     }
@@ -138,9 +163,9 @@ export class ReserveRange extends Range {
 
 /**
  * Geometrically weighted range used for inventory (right of price). The left
- * boundary is the highest price tick, while the right bound is the lowest.
- * Tokens nearer to price get smaller allocations so the overall value stays
- * constant as the range widens.
+ * boundary is the lowest price tick (closest to price), while the right bound
+ * is the highest. Tokens nearer to price get smaller allocations so the overall
+ * value stays constant as the range widens.
  */
 export class InventoryRange extends Range {
     constructor(qty: number, left: TickIndex, right: TickIndex) {
@@ -172,10 +197,24 @@ export class InventoryRange extends Range {
         return { qty, tickIdx: tick };
     }
 
-    public betTickIdx(): TickIndex {
+    public bestTickIdx(): TickIndex {
         this.assertNonEmpty();
 
         return this.left.clone();
+    }
+    
+    public peekBest(): TakeResult {
+        this.assertNonEmpty();
+        
+        let qty: number;
+        if (this.width === 1) {
+            qty = this.qty;
+        } else {
+            qty = this.bestTickQty();
+        }
+        
+        const tick = this.left.clone();
+        return { qty, tickIdx: tick };
     }
 
     public override takeWorst(): TakeResult {

@@ -74,10 +74,11 @@ export class AMM {
             this.inventory.qty() / this.curTick().index().getPrice();
         const respectiveReserve = this.inventory.getRespectiveReserve();
 
-        if (actualReserve > respectiveReserve)
-            panic(
-                "Actual reserve should always be smaller than the expected reserve"
-            );
+        if (this.inventory.qty() === 0) {
+             return 0;
+        }
+
+        if (respectiveReserve === 0) return 0;
 
         return 1 - actualReserve / respectiveReserve;
     }

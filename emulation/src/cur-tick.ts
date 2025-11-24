@@ -13,6 +13,7 @@ export type CurrentTickSwapArgs = {
 export type CurrentTickSwapResult = {
     qtyOut: number;
     reminderIn: number;
+    tickExhausted: boolean;
 };
 
 /**
@@ -72,22 +73,35 @@ export class CurrentTick {
                 return {
                     qtyOut: inventoryOut,
                     reminderIn: 0,
+                    tickExhausted: false,
                 };
             }
             
+            // If we have no current inventory, check if the recovery bin put something back into the inventory manager
+            // or if we just happen to be at a tick that has inventory in the manager
+            if (this.currentInventory === 0) {
+                const inventoryTick = this.inventory.takeBest(this.idx.clone());
+                if (inventoryTick) {
+                    this.putInventoryTick(inventoryTick);
+                }
+            }
+
             if (this.currentInventory === 0)
-                return { qtyOut: inventoryOut, reminderIn: reminderReserveIn };
+                return { qtyOut: inventoryOut, reminderIn: reminderReserveIn, tickExhausted: true };
 
             const needsInventory = reminderReserveIn * this.idx.getPrice();
 
             // if we consume the tick only partially, leave early
             if (needsInventory < this.currentInventory) {
                 this.currentInventory -= needsInventory;
-                this.currentReserve += reminderReserveIn;
-
-                return {
+              // Add to reserve
+            const recoveredReserve = reminderReserveIn;
+            this.currentReserve += recoveredReserve;
+            
+            return {
                     qtyOut: needsInventory,
                     reminderIn: 0,
+                    tickExhausted: false
                 };
             }
 
@@ -96,15 +110,17 @@ export class CurrentTick {
             const reminderReserve = reminderInventory / this.idx.getPrice();
 
             this.currentReserve += reminderReserveIn - reminderReserve;
+            this.currentInventory = 0;  // Fully consumed
 
             return {
                 qtyOut: getsInventory,
                 reminderIn: reminderReserve,
+                tickExhausted: true,
             };
         }
 
         if (this.currentReserve === 0)
-            return { qtyOut: 0, reminderIn: args.qtyIn };
+            return { qtyOut: 0, reminderIn: args.qtyIn, tickExhausted: true };
 
         const needsReserve = args.qtyIn / this.idx.getPrice();
 
@@ -115,6 +131,7 @@ export class CurrentTick {
             return {
                 qtyOut: needsReserve,
                 reminderIn: 0,
+                tickExhausted: false,
             };
         }
 
@@ -128,6 +145,7 @@ export class CurrentTick {
         return {
             qtyOut: getsReserve,
             reminderIn: reminderInventory,
+            tickExhausted: true
         };
     }
 
@@ -193,11 +211,7 @@ export class CurrentTick {
         }
 
         if (this.currentReserve > 0) {
-            if (this.currentReserve !== this.targetReserve)
-                panic(
-                    "Current reserve should match target reserve after tick exhaustion"
-                );
-
+            // Save accumulated reserve (may not match targetReserve if accumulated from swaps)
             this.reserve.stretchToCurTick(this.idx);
             this.reserve.put(this.currentReserve);
             this.inventory.notifyReserveChanged();
@@ -258,7 +272,7 @@ export class CurrentTick {
         this.cleanup();
         this.idx.dec();
 
-        const reserveTick = this.reserve.takeBest();
+        const reserveTick = this.reserve.takeBest(this.idx);
         if (reserveTick) this.putReserveTick(reserveTick);
     }
 
@@ -274,7 +288,7 @@ export class CurrentTick {
     }
 
     private putInventoryTick(tick: InventoryTick) {
-        if (tick.idx !== this.idx) panic("Ticks don't match");
+        if (!tick.idx.eq(this.idx)) panic("Ticks don't match");
 
         this.targetInventory += tick.inventory;
         this.currentInventory += tick.inventory;
