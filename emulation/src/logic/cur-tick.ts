@@ -1,5 +1,10 @@
-import { WithdrawResult } from "./amm.ts";
-import { Inventory, InventoryTick, Reserve, ReserveTick } from "./liquidity.ts";
+import {
+    Inventory,
+    type InventoryTick,
+    Reserve,
+    type ReserveTick,
+    type WithdrawResult,
+} from "./liquidity.ts";
 import { TickIndex } from "./ticks.ts";
 import { panic } from "./utils.ts";
 
@@ -36,6 +41,13 @@ export class CurrentTick {
     private currentInventory: number = 0;
 
     private recoveryBin: RecoveryBin;
+
+    public getLiquidity(): { reserve: number; inventory: number } {
+        return {
+            reserve: this.currentReserve,
+            inventory: this.currentInventory,
+        };
+    }
 
     /**
      * Adds fees to the recovery bin to be used as collateral for IL recovery.
@@ -76,7 +88,7 @@ export class CurrentTick {
                     tickExhausted: false,
                 };
             }
-            
+
             // If we have no current inventory, check if the recovery bin put something back into the inventory manager
             // or if we just happen to be at a tick that has inventory in the manager
             if (this.currentInventory === 0) {
@@ -87,21 +99,25 @@ export class CurrentTick {
             }
 
             if (this.currentInventory === 0)
-                return { qtyOut: inventoryOut, reminderIn: reminderReserveIn, tickExhausted: true };
+                return {
+                    qtyOut: inventoryOut,
+                    reminderIn: reminderReserveIn,
+                    tickExhausted: true,
+                };
 
             const needsInventory = reminderReserveIn * this.idx.getPrice();
 
             // if we consume the tick only partially, leave early
             if (needsInventory < this.currentInventory) {
                 this.currentInventory -= needsInventory;
-              // Add to reserve
-            const recoveredReserve = reminderReserveIn;
-            this.currentReserve += recoveredReserve;
-            
-            return {
+                // Add to reserve
+                const recoveredReserve = reminderReserveIn;
+                this.currentReserve += recoveredReserve;
+
+                return {
                     qtyOut: needsInventory,
                     reminderIn: 0,
-                    tickExhausted: false
+                    tickExhausted: false,
                 };
             }
 
@@ -110,7 +126,7 @@ export class CurrentTick {
             const reminderReserve = reminderInventory / this.idx.getPrice();
 
             this.currentReserve += reminderReserveIn - reminderReserve;
-            this.currentInventory = 0;  // Fully consumed
+            this.currentInventory = 0; // Fully consumed
 
             return {
                 qtyOut: getsInventory,
@@ -145,7 +161,7 @@ export class CurrentTick {
         return {
             qtyOut: getsReserve,
             reminderIn: reminderInventory,
-            tickExhausted: true
+            tickExhausted: true,
         };
     }
 
@@ -201,13 +217,17 @@ export class CurrentTick {
         // If we're selling reserve (reserve -> inventory), we're moving away from reserve
         // We should have consumed inventory at current tick first
         if (direction === "reserve -> inventory" && this.currentInventory > 0) {
-            panic("There is still some inventory left - must consume before moving");
+            panic(
+                "There is still some inventory left - must consume before moving"
+            );
         }
-        
+
         // If we're buying reserve (inventory -> reserve), we're moving into inventory
         // We should have consumed reserve at current tick first
         if (direction === "inventory -> reserve" && this.currentReserve > 0) {
-            panic("There is still some reserve left - must consume before moving");
+            panic(
+                "There is still some reserve left - must consume before moving"
+            );
         }
 
         if (this.currentReserve > 0) {
@@ -238,19 +258,23 @@ export class CurrentTick {
      */
     public decrement(direction: AMMSwapDirection) {
         // Moving LEFT (towards reserve)
-        
+
         // If we're selling reserve (reserve -> inventory), we're consuming INVENTORY
         // We should have consumed inventory at current tick first
         if (direction === "reserve -> inventory" && this.currentInventory > 0) {
-            panic("There is still some inventory left - must consume before moving");
+            panic(
+                "There is still some inventory left - must consume before moving"
+            );
         }
-        
+
         // If we're buying reserve (inventory -> reserve), we're consuming RESERVE
         // We should have consumed current reserve before needing more
         if (direction === "inventory -> reserve" && this.currentReserve > 0) {
-            panic("There is still some reserve left - must consume before moving");
+            panic(
+                "There is still some reserve left - must consume before moving"
+            );
         }
-        
+
         // Save any remaining inventory (accumulated or unused)
         if (this.currentInventory > 0) {
             this.inventory.putBest({
@@ -305,6 +329,10 @@ export class CurrentTick {
         this.targetInventory = this.targetReserve * this.idx.getPrice();
     }
 
+    public getRecoveryBin() {
+        return this.recoveryBin;
+    }
+
     constructor(
         private idx: TickIndex,
         private reserve: Reserve,
@@ -332,8 +360,15 @@ export class RecoveryBin {
     private collateral: number = 0;
     private worstTick: InventoryTick | undefined = undefined;
 
+    public getWorstTick(): InventoryTick | undefined {
+        return this.worstTick;
+    }
+
     public withdrawCut(cut: number): number {
         let inventoryToWithdraw = this.collateral * cut;
+        // BUG FIX: Reduce collateral when withdrawing
+        const collateralToWithdraw = this.collateral * cut;
+        this.collateral -= collateralToWithdraw;
 
         if (this.worstTick) {
             const worstTickCut = this.worstTick.inventory * cut;
@@ -430,6 +465,10 @@ export class RecoveryBin {
 
     public hasCollateral(): boolean {
         return this.collateral > 0;
+    }
+
+    public getCollateral(): number {
+        return this.collateral;
     }
 
     constructor(private reserve: Reserve, private inventory: Inventory) {}

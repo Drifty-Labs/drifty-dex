@@ -1,6 +1,16 @@
-import { InventoryRange, ReserveRange } from "./range.ts";
+import { InventoryRange, ReserveRange, type TakeResult } from "./range.ts";
 import { TickIndex } from "./ticks.ts";
 import { panic } from "./utils.ts";
+
+/**
+ * The result of a withdrawal operation.
+ */
+export type WithdrawResult = {
+    /** The amount of reserve withdrawn. */
+    reserve: number;
+    /** The amount of inventory withdrawn. */
+    inventory: number;
+};
 
 /**
  * Represents a tick with a certain amount of reserve liquidity.
@@ -19,6 +29,10 @@ export type ReserveTick = {
  */
 export class Reserve {
     private range: ReserveRange | undefined = undefined;
+
+    public unpack(curTick: TickIndex, tickSpan: number): TakeResult[] {
+        return this.range?.unpack(curTick, tickSpan) ?? [];
+    }
 
     /**
      * Withdraws a cut of the reserve liquidity.
@@ -58,7 +72,7 @@ export class Reserve {
         if (!this.isInitted()) return undefined;
 
         const bestTick = this.range!.peekBest();
-        
+
         if (!bestTick.tickIdx.eq(curTickIdx)) {
             return undefined;
         }
@@ -180,6 +194,14 @@ export class Reserve {
         this.assertInitted();
         return this.range!.getLeft();
     }
+
+    /**
+     * Gets the reserve ranges.
+     * @returns An array of reserve ranges.
+     */
+    public getRanges(): ReserveRange[] {
+        return this.range ? [this.range] : [];
+    }
 }
 
 /**
@@ -203,6 +225,16 @@ export class Inventory {
     private allocatedQty: number = 0;
     private shouldSpawnNew: boolean = true;
     private ranges: InventoryRange[] = [];
+
+    public unpack(curTick: TickIndex, tickSpan: number): TakeResult[] {
+        const result: TakeResult[] = [];
+
+        for (const range of this.ranges) {
+            result.push(...range.unpack(curTick, tickSpan));
+        }
+
+        return result;
+    }
 
     /**
      * Gets the total amount of reserve that was spent to acquire the current inventory.
@@ -246,8 +278,11 @@ export class Inventory {
 
         this.allocatedQty -= result.qty;
 
-        const unusedReserve = result.qty / result.tickIdx.getPrice();
-        this.respectiveReserve -= unusedReserve;
+        if (result.tickIdx.isInv()) {
+            this.respectiveReserve -= result.qty * result.tickIdx.getPrice();
+        } else {
+            this.respectiveReserve -= result.qty / result.tickIdx.getPrice();
+        }
 
         return {
             inventory: result.qty,
@@ -288,7 +323,11 @@ export class Inventory {
         this.allocatedQty -= result.qty;
 
         const unusedReserve = result.qty / result.tickIdx.getPrice();
-        this.respectiveReserve -= unusedReserve;
+        if (result.tickIdx.isInv()) {
+            this.respectiveReserve -= result.qty * result.tickIdx.getPrice();
+        } else {
+            this.respectiveReserve -= result.qty / result.tickIdx.getPrice();
+        }
 
         return {
             inventory: result.qty,
@@ -321,7 +360,9 @@ export class Inventory {
         if (!this.isEmpty()) {
             const currentWorst = this.peekWorst();
             if (currentWorst && !tick.idx.gt(currentWorst.idx)) {
-                panic(`Inventory invariant violated: New worst tick ${tick.idx.index()} must be greater than current worst ${currentWorst.idx.index()}`);
+                panic(
+                    `Inventory invariant violated: New worst tick ${tick.idx.index()} must be greater than current worst ${currentWorst.idx.index()}`
+                );
             }
         }
 
@@ -355,7 +396,7 @@ export class Inventory {
         // Best = Lowest Index (Closest to Price).
         // If we put 101, then 100. 100 < 101.
         // So new tick < current best.
-        
+
         if (!this.isEmpty()) {
             // We need to peek the current best to check.
             // But we don't have a cheap peekBest across all ranges easily exposed?
@@ -363,9 +404,11 @@ export class Inventory {
             const bestRange = this.ranges[0];
             // bestTickIdx() returns the lowest index (Best).
             const currentBestIdx = bestRange.bestTickIdx();
-            
+
             if (!tick.idx.lt(currentBestIdx)) {
-                 panic(`Inventory invariant violated: New best tick ${tick.idx.index()} must be less than current best ${currentBestIdx.index()}`);
+                panic(
+                    `Inventory invariant violated: New best tick ${tick.idx.index()} must be less than current best ${currentBestIdx.index()}`
+                );
             }
         }
 
@@ -409,5 +452,13 @@ export class Inventory {
      */
     public notifyReserveChanged() {
         this.shouldSpawnNew = true;
+    }
+
+    /**
+     * Gets the inventory ranges.
+     * @returns An array of inventory ranges.
+     */
+    public getRanges(): InventoryRange[] {
+        return this.ranges;
     }
 }

@@ -1,7 +1,7 @@
 import { AMM } from "./amm.ts";
-import { AMMSwapDirection } from "./cur-tick.ts";
+import { type AMMSwapDirection } from "./cur-tick.ts";
 import { TickIndex } from "./ticks.ts";
-import { panic, Side, TwoSided, twoSided } from "./utils.ts";
+import { panic, type TwoSided } from "./utils.ts";
 
 const STABLE_AMM_CUT = 0.05;
 const MIN_FEES = 0.0001;
@@ -99,8 +99,148 @@ export class Pool {
      */
     public getFees(): number {
         const il = this.getAvgIl();
+        return this.calculateFees(il);
+    }
 
+    private calculateFees(il: number): number {
         return MIN_FEES + (il <= 0.9 ? (MAX_FEES * il) / 0.9 : MAX_FEES);
+    }
+
+    public getLiquidity(tickSpan: number): LiquidityAbsolute {
+        const db = this.driftingAMM.base.getLiquidity(tickSpan);
+        const dq = this.driftingAMM.quote.getLiquidity(tickSpan);
+        const sb = this.stableAMM.base.getLiquidity(tickSpan);
+        const sq = this.stableAMM.quote.getLiquidity(tickSpan);
+
+        let maxBaseTickQty = 0,
+            maxQuoteTickQty = 0;
+
+        // combining all base ticks
+
+        const allBaseTicks = [
+            ...db.reserve,
+            ...dq.inventory,
+            ...sb.reserve,
+            ...sq.inventory,
+        ];
+        if (dq.recoveryBin.worstTick) {
+            allBaseTicks.push(dq.recoveryBin.worstTick);
+
+            maxBaseTickQty = Math.max(
+                maxBaseTickQty,
+                dq.recoveryBin.worstTick.qty
+            );
+        }
+        if (sq.recoveryBin.worstTick) {
+            allBaseTicks.push(sq.recoveryBin.worstTick);
+
+            maxBaseTickQty = Math.max(
+                maxBaseTickQty,
+                sq.recoveryBin.worstTick.qty
+            );
+        }
+
+        const baseTicks: Map<number, number> = new Map();
+
+        for (const tick of allBaseTicks) {
+            const idx = tick.tickIdx.toAbsolute();
+
+            const prev = baseTicks.get(idx) ?? 0;
+            const qty = prev + tick.qty;
+            baseTicks.set(idx, qty);
+
+            maxBaseTickQty = Math.max(maxBaseTickQty, qty);
+        }
+
+        // combining all quote ticks
+
+        const allQuoteTicks = [
+            ...dq.reserve,
+            ...db.inventory,
+            ...sq.reserve,
+            ...sb.inventory,
+        ];
+        if (db.recoveryBin.worstTick) {
+            allQuoteTicks.push(db.recoveryBin.worstTick);
+
+            maxQuoteTickQty = Math.max(
+                maxQuoteTickQty,
+                db.recoveryBin.worstTick.qty
+            );
+        }
+        if (sb.recoveryBin.worstTick) {
+            allQuoteTicks.push(sb.recoveryBin.worstTick);
+
+            maxQuoteTickQty = Math.max(
+                maxQuoteTickQty,
+                sb.recoveryBin.worstTick.qty
+            );
+        }
+
+        const quoteTicks: Map<number, number> = new Map();
+
+        for (const tick of allQuoteTicks) {
+            const idx = tick.tickIdx.toAbsolute();
+
+            const prev = quoteTicks.get(idx) ?? 0;
+            const qty = prev + tick.qty;
+            quoteTicks.set(idx, qty);
+
+            maxQuoteTickQty = Math.max(maxQuoteTickQty, qty);
+        }
+
+        // collect all liquidity from the current tick
+
+        const baseCurTick =
+            db.curTick.reserve +
+            dq.curTick.inventory +
+            sb.curTick.reserve +
+            sq.curTick.inventory;
+
+        maxBaseTickQty = Math.max(maxBaseTickQty, baseCurTick);
+
+        const quoteCurTick =
+            dq.curTick.reserve +
+            db.curTick.inventory +
+            sq.curTick.reserve +
+            sb.curTick.inventory;
+
+        maxQuoteTickQty = Math.max(maxQuoteTickQty, quoteCurTick);
+
+        // collect all collateral
+
+        const baseRecoveryBin =
+            dq.recoveryBin.collateral + sq.recoveryBin.collateral;
+        const quoteRecoveryBin =
+            db.recoveryBin.collateral + sb.recoveryBin.collateral;
+
+        // collect and verify current tick idx invariant
+
+        const curIdx = db.curTick.idx.toAbsolute();
+        if (
+            db.curTick.idx.toAbsolute() !== curIdx ||
+            dq.curTick.idx.toAbsolute() !== curIdx ||
+            sb.curTick.idx.toAbsolute() !== curIdx ||
+            sq.curTick.idx.toAbsolute() !== curIdx
+        ) {
+            panic(`Ticks don't match`);
+        }
+
+        return {
+            base: baseTicks,
+            quote: quoteTicks,
+            currentTick: {
+                idx: curIdx,
+                base: baseCurTick,
+                quote: quoteCurTick,
+            },
+            recoveryBinCollateral: {
+                base: baseRecoveryBin,
+                quote: quoteRecoveryBin,
+            },
+            maxBase: maxBaseTickQty,
+            maxQuote: maxQuoteTickQty,
+        };
     }
 
     /**
@@ -228,7 +368,7 @@ export class Pool {
                         break;
                     }
                 }
-                
+
                 if (qtyIn === 0) return qtyOut;
             }
 
@@ -237,58 +377,64 @@ export class Pool {
             if (!hasAny && qtyIn > 0) {
                 // Verify AMMs are truly exhausted of what they provide
                 let canMove = true;
-                
+
                 for (const [amm, dir] of amms) {
                     const curTick = amm.curTick();
-                    
+
                     // Check what asset this AMM PROVIDES (not consumes!)
                     if (dir === "reserve -> inventory") {
                         // Consumes reserve, PROVIDES inventory
                         if (curTick.hasInventory()) {
-                            console.log(`Cannot move: AMM (${dir}) still has inventory to provide`);
+                            console.log(
+                                `Cannot move: AMM (${dir}) still has inventory to provide`
+                            );
                             canMove = false;
                             break;
                         }
                     } else {
                         // Consumes inventory, PROVIDES reserve
                         if (curTick.hasReserve()) {
-                            console.log(`Cannot move: AMM (${dir}) still has reserve to provide`);
+                            console.log(
+                                `Cannot move: AMM (${dir}) still has reserve to provide`
+                            );
                             canMove = false;
                             break;
                         }
                     }
                 }
-                
+
                 if (!canMove) {
                     // AMMs still have assets but swap() returned no progress
                     // This might be due to price limits or IL recovery
                     // For now, break to avoid infinite loop
-                    console.log("Breaking: AMMs have assets but no progress made");
+                    console.log(
+                        "Breaking: AMMs have assets but no progress made"
+                    );
                     break;
                 }
-                
 
-                
                 // Move ALL AMMs together, passing their individual swap directions
                 // Move ALL AMMs together, passing their individual swap directions
-                if (direction === "quote -> base") {
-                    // Price UP (Buy Base):
-                    // - Base (Inverted): Move Left (Reserve) -> dec() (-100 -> -101 -> Absolute 101)
-                    // - Quote (Normal): Move Right (Inventory) -> inc() (100 -> 101)
-                    this.stableAMM.base.curTick().decrement(baseDirection);
-                    this.stableAMM.quote.curTick().increment(quoteDirection);
+                if (direction === "base -> quote") {
+                    // Price Down
+                    baseDirection = "reserve -> inventory";
+                    quoteDirection = "inventory -> reserve";
 
-                    this.driftingAMM.base.curTick().decrement(baseDirection);
-                    this.driftingAMM.quote.curTick().increment(quoteDirection);
-                } else {
-                    // Price DOWN (Sell Base):
-                    // - Base (Inverted): Move Right (Inventory) -> inc() (-100 -> -99 -> Absolute 99)
-                    // - Quote (Normal): Move Left (Reserve) -> dec() (100 -> 99)
                     this.stableAMM.base.curTick().increment(baseDirection);
                     this.stableAMM.quote.curTick().decrement(quoteDirection);
 
                     this.driftingAMM.base.curTick().increment(baseDirection);
                     this.driftingAMM.quote.curTick().decrement(quoteDirection);
+                } else {
+                    // Price Up
+                    baseDirection = "inventory -> reserve";
+                    quoteDirection = "reserve -> inventory";
+
+                    this.stableAMM.base.curTick().decrement(baseDirection);
+                    this.stableAMM.quote.curTick().increment(quoteDirection);
+
+                    this.driftingAMM.base.curTick().decrement(baseDirection);
+                    this.driftingAMM.quote.curTick().increment(quoteDirection);
                 }
 
                 const indices = amms.map(([it, _]) =>
@@ -315,10 +461,9 @@ export class Pool {
      */
     constructor(curTickIdx: number) {
         // Base is Inverted (Relative = -Absolute)
-        const baseTickIdx = new TickIndex(true, -curTickIdx); 
+        const baseTickIdx = new TickIndex(true, -curTickIdx);
         // Quote is Normal (Relative = Absolute)
-        const quoteTickIdx = new TickIndex(false, curTickIdx); 
-
+        const quoteTickIdx = new TickIndex(false, curTickIdx);
 
         this.stableAMM = {
             base: new AMM(baseTickIdx),
@@ -331,3 +476,19 @@ export class Pool {
         };
     }
 }
+
+export type LiquidityAbsolute = {
+    base: Map<number, number>;
+    quote: Map<number, number>;
+    currentTick: {
+        idx: number;
+        base: number;
+        quote: number;
+    };
+    recoveryBinCollateral: {
+        base: number;
+        quote: number;
+    };
+    maxBase: number;
+    maxQuote: number;
+};

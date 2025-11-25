@@ -189,16 +189,58 @@ Deno.test("Pool - Full Simulation (Round Trip)", () => {
     // Check IL / Fees
     const avgIl = pool.getAvgIl();
     const fees = pool.getFees();
-    console.log(`Average IL: ${avgIl}`);
-    console.log(`Current Fees: ${fees}`);
-    
-    // IL should be non-zero (or close to it if we returned exactly, but fees prevent exact return)
-    // Actually, if we return to start price, IL should be near zero?
-    // "IL is the difference between value of assets held in AMM and value if held in wallet."
-    // If price returns to start, IL -> 0.
-    // But we lost some value to fees (which are in RecoveryBin).
-    // RecoveryBin collateral counts towards Inventory value?
-    // `withdraw` includes `recoveryBin.withdrawCut`.
-    // So fees are part of the AMM value.
-    // So IL should be low.
+    console.log(`Average IL: ${pool.getAvgIl()}`);
+    console.log(`Current Fees: ${pool.getFees()}`);
 });
+
+Deno.test("Pool - Get Liquidity Ranges", () => {
+    const pool = new Pool(1000);
+    pool.deposit("base", 1000);
+    pool.deposit("quote", 1000);
+
+    // Perform some swaps to generate inventory
+    pool.swap({ direction: "base -> quote", qtyIn: 10 });
+    pool.swap({ direction: "quote -> base", qtyIn: 10 });
+
+    const ranges = pool.getLiquidityRanges();
+
+    // Verify structure
+    assertEquals(Array.isArray(ranges.base), true);
+    assertEquals(Array.isArray(ranges.quote), true);
+    assertEquals(typeof ranges.curTick.base, "number");
+    assertEquals(typeof ranges.curTick.quote, "number");
+    assertEquals(typeof ranges.recoveryBin.base, "number");
+    assertEquals(typeof ranges.recoveryBin.quote, "number");
+
+    // Verify content
+    // Base ranges should include reserve and inventory
+    // We deposited 1000 base, so we expect some reserve ranges.
+    // We swapped base -> quote, so we expect some inventory in quote AMM?
+    // Wait. Base -> Quote: User sells Base. Base AMM gets Base Reserve (Reserve -> Inventory).
+    // So Base AMM has Inventory.
+    // Quote AMM pays Quote Reserve (Inventory -> Reserve).
+    // So Quote AMM reduces Inventory (or Reserve if no Inventory).
+    
+    // Actually, let's just check that we have some ranges.
+    console.log("Base Ranges:", ranges.base.length);
+    console.log("Quote Ranges:", ranges.quote.length);
+    
+    // We expect at least 1 reserve range for each stable AMM.
+    // And potentially inventory ranges from swaps.
+    
+    // Stable Base: 1 Reserve Range.
+    // Drifting Base: 1 Reserve Range.
+    // Stable Quote: 1 Reserve Range.
+    // Drifting Quote: 1 Reserve Range.
+    // Total 4 Reserve Ranges minimum if all initialized.
+    // Plus Inventory.
+    
+    // We deposited to both, so all 4 AMMs should be initialized (deposit splits between stable/drifting).
+    
+    assertEquals(ranges.base.length >= 2, true);
+    assertEquals(ranges.quote.length >= 2, true);
+    
+    console.log("Recovery Bin Base:", ranges.recoveryBin.base);
+    console.log("Recovery Bin Quote:", ranges.recoveryBin.quote);
+});
+

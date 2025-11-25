@@ -206,6 +206,14 @@ export class TickIndex {
     }
 
     /**
+     * Checks if the tick has an inverted orientation.
+     * @returns `true` if inverted, `false` otherwise.
+     */
+    public isInv(): boolean {
+        return this.isInverted;
+    }
+
+    /**
      * Creates a new `TickIndex`.
      * @param isInverted Whether the tick has an inverted orientation.
      * @param idx The relative index of the tick.

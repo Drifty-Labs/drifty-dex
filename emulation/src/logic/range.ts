@@ -28,6 +28,8 @@ export abstract class Range {
     /** Takes the tick furthest away from price. */
     public abstract takeWorst(): TakeResult;
 
+    public abstract unpack(curTick: TickIndex, tickSpan: number): TakeResult[];
+
     get width() {
         if (this.right.lt(this.left)) return 0;
 
@@ -69,7 +71,22 @@ export class ReserveRange extends Range {
             );
 
         super(qty, left, right);
-        console.log(`ReserveRange created: qty=${qty}, left=${left.index()}, right=${right.index()}, width=${this.width}`);
+    }
+
+    public override unpack(curTick: TickIndex, tickSpan: number): TakeResult[] {
+        const result: TakeResult[] = [];
+
+        if (!this.isEmpty()) {
+            const q = this.qty / this.width;
+
+            for (const i = this.right.clone(); i.ge(this.left); i.dec()) {
+                if (i.distance(curTick) > tickSpan) break;
+
+                result.push({ qty: q, tickIdx: i.clone() });
+            }
+        }
+
+        return result;
     }
 
     public put(qty: number) {
@@ -101,10 +118,10 @@ export class ReserveRange extends Range {
 
     public peekBest(): TakeResult {
         this.assertNonEmpty();
-        
+
         const qty = this.qty / this.width;
         const tick = this.right.clone();
-        
+
         return { qty, tickIdx: tick };
     }
 
@@ -177,6 +194,26 @@ export class InventoryRange extends Range {
         super(qty, left, right);
     }
 
+    public override unpack(curTick: TickIndex, tickSpan: number): TakeResult[] {
+        const result: TakeResult[] = [];
+
+        if (!this.isEmpty()) {
+            let qty = this.bestTickQty();
+            let sum = qty;
+
+            for (const i = this.left.clone(); i.le(this.right); i.inc()) {
+                if (i.distance(curTick) > tickSpan) break;
+
+                result.push({ qty, tickIdx: i.clone() });
+
+                qty *= BASE_PRICE;
+                sum += qty;
+            }
+        }
+
+        return result;
+    }
+
     public override takeBest(): TakeResult {
         this.assertNonEmpty();
 
@@ -202,17 +239,17 @@ export class InventoryRange extends Range {
 
         return this.left.clone();
     }
-    
+
     public peekBest(): TakeResult {
         this.assertNonEmpty();
-        
+
         let qty: number;
         if (this.width === 1) {
             qty = this.qty;
         } else {
             qty = this.bestTickQty();
         }
-        
+
         const tick = this.left.clone();
         return { qty, tickIdx: tick };
     }

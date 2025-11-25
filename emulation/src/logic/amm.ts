@@ -1,5 +1,6 @@
 import { CurrentTick } from "./cur-tick.ts";
-import { Inventory, Reserve } from "./liquidity.ts";
+import { Inventory, Reserve, type WithdrawResult } from "./liquidity.ts";
+import type { TakeResult } from "./range.ts";
 import { TickIndex } from "./ticks.ts";
 import { panic } from "./utils.ts";
 
@@ -28,13 +29,20 @@ export type WithdrawArgs = {
 };
 
 /**
- * The result of a withdrawal operation.
+ * Total liquidity of the AMM
  */
-export type WithdrawResult = {
-    /** The amount of reserve withdrawn. */
-    reserve: number;
-    /** The amount of inventory withdrawn. */
-    inventory: number;
+export type Liquidity = {
+    curTick: {
+        idx: TickIndex;
+        reserve: number;
+        inventory: number;
+    };
+    recoveryBin: {
+        collateral: number;
+        worstTick?: TakeResult;
+    };
+    reserve: TakeResult[];
+    inventory: TakeResult[];
 };
 
 /**
@@ -64,23 +72,61 @@ export class AMM {
     private inventory: Inventory = new Inventory();
     private currentTick: CurrentTick;
 
+    public getLiquidity(tickSpan: number): Liquidity {
+        const wt = this.currentTick.getRecoveryBin().getWorstTick();
+
+        return {
+            curTick: {
+                idx: this.currentTick.index(),
+                ...this.currentTick.getLiquidity(),
+            },
+            recoveryBin: {
+                collateral: this.currentTick.getRecoveryBin().getCollateral(),
+                worstTick: wt
+                    ? { qty: wt.inventory, tickIdx: wt.idx }
+                    : undefined,
+            },
+            reserve: this.reserve.unpack(
+                this.curTick().index().clone(),
+                tickSpan
+            ),
+            inventory: this.inventory.unpack(
+                this.curTick().index().clone(),
+                tickSpan
+            ),
+        };
+    }
+
     /**
      * Calculates the impermanent loss (IL) of the AMM.
      * IL is the difference between the value of the assets held in the AMM and the value of the assets if they were held in a wallet.
      * @returns The impermanent loss as a percentage (0 to 1).
      */
     public getIl(): number {
-        const actualReserve =
-            this.inventory.qty() / this.curTick().index().getPrice();
+        let actualReserve = 0;
+        if (this.curTick().index().isInv()) {
+            actualReserve =
+                this.inventory.qty() / this.curTick().index().getPrice();
+        } else {
+            actualReserve =
+                this.inventory.qty() * this.curTick().index().getPrice();
+        }
         const respectiveReserve = this.inventory.getRespectiveReserve();
 
         if (this.inventory.qty() === 0) {
-             return 0;
+            return 0;
         }
 
         if (respectiveReserve === 0) return 0;
 
         return 1 - actualReserve / respectiveReserve;
+    }
+
+    public getLiquidityRanges() {
+        return {
+            reserve: this.reserve.getRanges(),
+            inventory: this.inventory.getRanges(),
+        };
     }
 
     /**
@@ -166,12 +212,26 @@ export class AMM {
                 const worstTick = this.inventory.takeWorst();
                 if (!worstTick) panic("Worst tick should exist");
 
-                const worstTickRespectiveReserve =
-                    worstTick.inventory / worstTick.idx.getPrice();
+                if (!worstTick) panic("Worst tick should exist");
+
+                let worstTickRespectiveReserve = 0;
+                if (worstTick.idx.isInv()) {
+                    worstTickRespectiveReserve =
+                        worstTick.inventory / worstTick.idx.getPrice();
+                } else {
+                    worstTickRespectiveReserve =
+                        worstTick.inventory * worstTick.idx.getPrice();
+                }
 
                 if (worstTickRespectiveReserve >= respectiveReserve) {
-                    const takeInventory =
-                        respectiveReserve * worstTick.idx.getPrice();
+                    let takeInventory = 0;
+                    if (worstTick.idx.isInv()) {
+                        takeInventory =
+                            respectiveReserve / worstTick.idx.getPrice();
+                    } else {
+                        takeInventory =
+                            respectiveReserve * worstTick.idx.getPrice();
+                    }
 
                     worstTick.inventory -= takeInventory;
 
