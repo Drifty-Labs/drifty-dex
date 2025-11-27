@@ -1,36 +1,28 @@
 import { createEffect, createMemo, For } from "solid-js";
-import { type LiquidityAbsolute } from "../logic/pool.ts";
+import { type LiquidityDigestAbsolute } from "../logic/pool.ts";
 import { CurTick, Tick } from "./Tick.tsx";
 import { panic } from "../logic/utils.ts";
+import { OrderedMap } from "@js-sdsl/ordered-map";
 
 export type LiquidityChartProps = {
-    liquidity: LiquidityAbsolute;
+    liquidity: LiquidityDigestAbsolute;
 };
 
 export function LiquidityChart(props: LiquidityChartProps) {
-    const baseTicks = createMemo(() =>
-        fillTickGaps(props.liquidity.base, true)
-    );
-    const quoteTicks = createMemo(() =>
-        fillTickGaps(props.liquidity.quote, false)
-    );
-
-    createEffect(() => {
-        console.log("base", baseTicks().length);
-        console.log("quote", quoteTicks().length);
-    });
+    const baseTicks = createMemo(() => fillTickGaps(props.liquidity.base));
+    const quoteTicks = createMemo(() => fillTickGaps(props.liquidity.quote));
 
     return (
         <div class="w-full h-[500px] bg-bg flex flex-row gap-0.5 flex-nowrap">
             <div class="flex flex-row gap-0.5 flex-nowrap">
-                <For each={baseTicks()}>
+                <For each={quoteTicks()}>
                     {([idx, qty]) => (
                         <Tick
                             idx={idx}
                             widthPx={5}
                             qty={qty}
                             maxQty={props.liquidity.maxBase}
-                            color="blue"
+                            isBase={false}
                         />
                     )}
                 </For>
@@ -42,18 +34,17 @@ export function LiquidityChart(props: LiquidityChartProps) {
                     base={props.liquidity.currentTick.base}
                     quote={props.liquidity.currentTick.quote}
                     maxBaseQty={props.liquidity.maxBase}
-                    maxQuoteQty={props.liquidity.maxQuote}
                 />
             </div>
             <div class="flex flex-row gap-0.5 flex-nowrap">
-                <For each={quoteTicks()}>
+                <For each={baseTicks()}>
                     {([idx, qty]) => (
                         <Tick
                             idx={idx}
                             widthPx={5}
                             qty={qty}
-                            maxQty={props.liquidity.maxQuote}
-                            color="green"
+                            maxQty={props.liquidity.maxBase}
+                            isBase
                         />
                     )}
                 </For>
@@ -62,26 +53,19 @@ export function LiquidityChart(props: LiquidityChartProps) {
     );
 }
 
-function fillTickGaps(
-    tickMap: Map<number, number>,
-    inverted: boolean
-): [number, number][] {
+function fillTickGaps(tickMap: OrderedMap<number, number>): [number, number][] {
     const result: [number, number][] = [];
-    const ticks = [...tickMap.entries()];
 
     let prevIdx: undefined | number = undefined;
-    for (
-        let i = inverted ? ticks.length - 1 : 0;
-        inverted ? i >= 0 : i < ticks.length;
-        inverted ? i-- : i++
-    ) {
-        if (prevIdx === undefined) {
-            prevIdx = ticks[i][0];
-            result.push(ticks[i]);
-            continue;
-        }
 
-        const curIdx = ticks[i][0];
+    tickMap.forEach(([idx, qty]) => {
+        const curIdx = idx;
+
+        if (prevIdx === undefined) {
+            prevIdx = curIdx;
+            result.push([idx, qty]);
+            return;
+        }
 
         // making sure we cover all the gaps with ghost ticks
         if (curIdx > prevIdx) {
@@ -99,8 +83,8 @@ function fillTickGaps(
         }
 
         prevIdx = curIdx;
-        result.push(ticks[i]);
-    }
+        result.push([idx, qty]);
+    });
 
     return result;
 }

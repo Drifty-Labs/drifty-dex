@@ -1,4 +1,4 @@
-import { assertEquals, assertThrows } from "jsr:@std/assert";
+import { assertEquals, assertThrows } from "@std/assert";
 import { TickIndexFactory } from "../ticks.ts";
 import { MAX_TICK, MIN_TICK } from "../utils.ts";
 
@@ -6,10 +6,10 @@ Deno.test("TickIndexFactory - Normal", () => {
     const factory = new TickIndexFactory(false);
     const tick = factory.make(0);
     assertEquals(tick.toAbsolute(), 0);
-    
+
     const min = factory.min();
     assertEquals(min.toAbsolute(), MIN_TICK);
-    
+
     const max = factory.max();
     assertEquals(max.toAbsolute(), MAX_TICK);
 });
@@ -18,13 +18,13 @@ Deno.test("TickIndexFactory - Inverted", () => {
     const factory = new TickIndexFactory(true);
     const tick = factory.make(0);
     assertEquals(tick.toAbsolute(), 0);
-    
+
     // For inverted ticks:
     // min() creates a tick with relative index -MAX_TICK
     // toAbsolute() converts -(-MAX_TICK) -> MAX_TICK
     const min = factory.min();
     assertEquals(min.toAbsolute(), MAX_TICK);
-    
+
     // max() creates a tick with relative index -MIN_TICK
     // toAbsolute() converts -(-MIN_TICK) -> MIN_TICK
     const max = factory.max();
@@ -43,7 +43,7 @@ Deno.test("TickIndex - Basic Operations (Normal)", () => {
 
     tick.add(10);
     assertEquals(tick.toAbsolute(), 110);
-    
+
     tick.sub(5);
     assertEquals(tick.toAbsolute(), 105);
 });
@@ -67,7 +67,7 @@ Deno.test("TickIndex - Basic Operations (Inverted)", () => {
     // toAbsolute() returns -(-90) = 90
     tick.add(10);
     assertEquals(tick.toAbsolute(), 90);
-    
+
     // sub(5) decreases relative index: -90 -> -95
     // toAbsolute() returns -(-95) = 95
     tick.sub(5);
@@ -96,10 +96,10 @@ Deno.test("TickIndex - Comparison (Inverted)", () => {
 
     // -100 > -200
     // So t100 is GREATER than t200 in relative terms (higher local price)
-    
+
     assertEquals(t200.lt(t100), true);
     assertEquals(t200.le(t100), true);
-    
+
     assertEquals(t100.gt(t200), true);
     assertEquals(t100.ge(t200), true);
 });
@@ -127,7 +127,7 @@ Deno.test("TickIndex - Synchronization & Inversion", () => {
 
     // Base: inc() -> relative 1001 -> abs 1001
     tBase.inc();
-    
+
     // Quote: dec() -> relative -1001 -> abs 1001
     // Wait, if we want them to meet at the same absolute value:
     // Base moves UP (Price Up) -> 101
@@ -137,7 +137,7 @@ Deno.test("TickIndex - Synchronization & Inversion", () => {
 
     assertEquals(tBase.toAbsolute(), startIdx + 1);
     assertEquals(tQuote.toAbsolute(), startIdx + 1);
-    
+
     // Verify they point to the same absolute value
     assertEquals(tBase.toAbsolute(), tQuote.toAbsolute());
 });
@@ -157,7 +157,7 @@ Deno.test("TickIndex - Distance", () => {
 
 Deno.test("TickIndex - Bounds Check", () => {
     const factory = new TickIndexFactory(false);
-    
+
     assertThrows(() => {
         factory.make(MAX_TICK + 1);
     });

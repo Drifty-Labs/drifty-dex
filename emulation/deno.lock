@@ -1,6 +1,10 @@
 {
   "version": "5",
   "specifiers": {
+    "jsr:@std/assert@^1.0.16": "1.0.16",
+    "jsr:@std/internal@^1.0.12": "1.0.12",
+    "npm:@atsjj/btreemap@0.1": "0.1.0",
+    "npm:@js-sdsl/ordered-map@^4.4.2": "4.4.2",
     "npm:@tailwindcss/vite@^4.1.17": "4.1.17_vite@7.2.4__@types+node@24.10.1__picomatch@4.0.3_@types+node@24.10.1",
     "npm:@types/node@^24.10.1": "24.10.1",
     "npm:solid-js@^1.9.10": "1.9.10_seroval@1.3.2",
@@ -10,7 +14,21 @@
     "npm:vite@*": "7.2.4_@types+node@24.10.1_picomatch@4.0.3",
     "npm:vite@^7.2.4": "7.2.4_@types+node@24.10.1_picomatch@4.0.3"
   },
+  "jsr": {
+    "@std/assert@1.0.16": {
+      "integrity": "6a7272ed1eaa77defe76e5ff63ca705d9c495077e2d5fd0126d2b53fc5bd6532",
+      "dependencies": [
+        "jsr:@std/internal"
+      ]
+    },
+    "@std/internal@1.0.12": {
+      "integrity": "972a634fd5bc34b242024402972cd5143eac68d8dffaca5eaa4dba30ce17b027"
+    }
+  },
   "npm": {
+    "@atsjj/btreemap@0.1.0": {
+      "integrity": "sha512-G5wahXv2NkzHrS5jt9KWLPjx/OOF2wd5Kc/mzlAzDyMlEiZMD8UJO/Q771d9YIkHfTNKc1NDVvyr5sE77yQ5xw=="
+    },
     "@babel/code-frame@7.27.1": {
       "integrity": "sha512-cjQ7ZlQ0Mv3b47hABuTevyTuYN4i+loJKGeV9flcCgIK37cCXRh+L1bd3iBHlynerhQ7BhCkn2BPbQUL+rGqFg==",
       "dependencies": [
@@ -303,6 +321,9 @@
         "@jridgewell/resolve-uri",
         "@jridgewell/sourcemap-codec"
       ]
+    },
+    "@js-sdsl/ordered-map@4.4.2": {
+      "integrity": "sha512-iUKgm52T8HOE/makSxjqoWhe95ZJA1/G1sYsGev2JDKUSS14KAgg1LHb+Ba+IPow0xflbnSkOsZcO08C7w1gYw=="
     },
     "@rollup/rollup-android-arm-eabi@4.53.3": {
       "integrity": "sha512-mRSi+4cBjrRLoaal2PnqH82Wqyb+d3HsPUN/W+WslCXsZsyHa9ZeQQX/pQsZaVIWDkPcpV6jJ+3KLbTbgnwv8w==",
@@ -956,8 +977,13 @@
     }
   },
   "workspace": {
+    "dependencies": [
+      "jsr:@std/assert@^1.0.16"
+    ],
     "packageJson": {
       "dependencies": [
+        "npm:@atsjj/btreemap@0.1",
+        "npm:@js-sdsl/ordered-map@^4.4.2",
         "npm:@tailwindcss/vite@^4.1.17",
         "npm:@types/node@^24.10.1",
         "npm:solid-js@^1.9.10",

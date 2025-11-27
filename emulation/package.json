@@ -9,6 +9,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@atsjj/btreemap": "^0.1.0",
+    "@js-sdsl/ordered-map": "^4.4.2",
     "@tailwindcss/vite": "^4.1.17",
     "solid-js": "^1.9.10",
     "tailwindcss": "^4.1.17"

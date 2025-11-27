@@ -1,7 +1,14 @@
 import { AMM } from "./amm.ts";
 import { type AMMSwapDirection } from "./cur-tick.ts";
 import { TickIndex } from "./ticks.ts";
-import { panic, type TwoSided } from "./utils.ts";
+import {
+    almostEq,
+    panic,
+    TEN_PERCENT_TICKS,
+    tickToPrice,
+    type TwoSided,
+} from "./utils.ts";
+import { OrderedMap } from "@js-sdsl/ordered-map";
 
 const STABLE_AMM_CUT = 0.05;
 const MIN_FEES = 0.0001;
@@ -34,213 +41,38 @@ export class Pool {
     private stableAMM: TwoSided<AMM>;
     private driftingAMM: TwoSided<AMM>;
 
+    public clone() {
+        const p = new Pool(this.driftingAMM.base.curTick.index.toAbsolute());
+
+        p.stableAMM.base = this.stableAMM.base.clone();
+        p.stableAMM.quote = this.stableAMM.quote.clone();
+
+        p.driftingAMM.base = this.driftingAMM.base.clone();
+        p.driftingAMM.quote = this.driftingAMM.quote.clone();
+
+        return p;
+    }
+
     /**
      * Rebases the drifting AMMs to match the opposite side's inventory.
      * This should be called periodically by an external keeper.
      */
-    public rebase() {
-        const baseWorst = this.driftingAMM.base.getWorstInventoryTick();
-        const quoteWorst = this.driftingAMM.quote.getWorstInventoryTick();
-
-        // For base drifting AMM, left bound is opposite (quote) worst inventory tick
-        // If no inventory, default to min()
-        // Quote is Positive, Base is Negated. So we must Negate Quote index to get Base Target.
-        const baseTarget = quoteWorst
-            ? new TickIndex(false, -quoteWorst.idx.index())
-            : this.driftingAMM.base.curTick().index().min();
-        this.driftingAMM.base.rebase(baseTarget);
+    private drift() {
+        const baseWorst = this.driftingAMM.base.getRightInventoryTick();
 
         // For quote drifting AMM, left bound is opposite (base) worst inventory tick
         // Base is Negated, Quote is Positive. So we must Negate Base index to get Quote Target.
-        const quoteTarget = baseWorst
-            ? new TickIndex(false, -baseWorst.idx.index())
-            : this.driftingAMM.quote.curTick().index().min();
-        this.driftingAMM.quote.rebase(quoteTarget);
-    }
-
-    /**
-     * Calculates the average impermanent loss (IL) across all AMMs in the pool.
-     * @returns The average IL as a percentage (0 to 1).
-     */
-    public getAvgIl(): number {
-        const totalReserve0 =
-            this.stableAMM.base.getDepositedReserve() +
-            this.driftingAMM.base.getDepositedReserve();
-        const il01 =
-            (this.stableAMM.base.getIl() *
-                this.stableAMM.base.getDepositedReserve()) /
-            totalReserve0;
-        const il02 =
-            (this.driftingAMM.base.getIl() *
-                this.driftingAMM.base.getDepositedReserve()) /
-            totalReserve0;
-        const il0 = il01 + il02;
-
-        const totalReserve1 =
-            this.stableAMM.quote.getDepositedReserve() +
-            this.driftingAMM.quote.getDepositedReserve();
-        const il11 =
-            (this.stableAMM.quote.getIl() *
-                this.stableAMM.quote.getDepositedReserve()) /
-            totalReserve1;
-        const il12 =
-            (this.driftingAMM.quote.getIl() *
-                this.driftingAMM.quote.getDepositedReserve()) /
-            totalReserve1;
-        const il1 = il11 + il12;
-
-        return (il0 + il1) / 2;
-    }
-
-    /**
-     * Calculates the dynamic fees for a swap based on the average impermanent loss.
-     * The higher the IL, the higher the fees.
-     * @returns The fee rate as a percentage (0 to 1).
-     */
-    public getFees(): number {
-        const il = this.getAvgIl();
-        return this.calculateFees(il);
-    }
-
-    private calculateFees(il: number): number {
-        return MIN_FEES + (il <= 0.9 ? (MAX_FEES * il) / 0.9 : MAX_FEES);
-    }
-
-    public getLiquidity(tickSpan: number): LiquidityAbsolute {
-        const db = this.driftingAMM.base.getLiquidity(tickSpan);
-        const dq = this.driftingAMM.quote.getLiquidity(tickSpan);
-        const sb = this.stableAMM.base.getLiquidity(tickSpan);
-        const sq = this.stableAMM.quote.getLiquidity(tickSpan);
-
-        let maxBaseTickQty = 0,
-            maxQuoteTickQty = 0;
-
-        // combining all base ticks
-
-        const allBaseTicks = [
-            ...db.reserve,
-            ...dq.inventory,
-            ...sb.reserve,
-            ...sq.inventory,
-        ];
-        if (dq.recoveryBin.worstTick) {
-            allBaseTicks.push(dq.recoveryBin.worstTick);
-
-            maxBaseTickQty = Math.max(
-                maxBaseTickQty,
-                dq.recoveryBin.worstTick.qty
-            );
-        }
-        if (sq.recoveryBin.worstTick) {
-            allBaseTicks.push(sq.recoveryBin.worstTick);
-
-            maxBaseTickQty = Math.max(
-                maxBaseTickQty,
-                sq.recoveryBin.worstTick.qty
-            );
+        if (baseWorst !== undefined) {
+            this.driftingAMM.quote.drift(baseWorst.idx.clone(true));
         }
 
-        const baseTicks: Map<number, number> = new Map();
+        const quoteWorst = this.driftingAMM.quote.getRightInventoryTick();
 
-        for (const tick of allBaseTicks) {
-            const idx = tick.tickIdx.toAbsolute();
-
-            const prev = baseTicks.get(idx) ?? 0;
-            const qty = prev + tick.qty;
-            baseTicks.set(idx, qty);
-
-            maxBaseTickQty = Math.max(maxBaseTickQty, qty);
+        // For base drifting AMM, left bound is opposite (quote) worst inventory tick
+        // Quote is Positive, Base is Negated. So we must Negate Quote index to get Base Target.
+        if (quoteWorst !== undefined) {
+            this.driftingAMM.base.drift(quoteWorst.idx.clone(true));
         }
-
-        // combining all quote ticks
-
-        const allQuoteTicks = [
-            ...dq.reserve,
-            ...db.inventory,
-            ...sq.reserve,
-            ...sb.inventory,
-        ];
-        if (db.recoveryBin.worstTick) {
-            allQuoteTicks.push(db.recoveryBin.worstTick);
-
-            maxQuoteTickQty = Math.max(
-                maxQuoteTickQty,
-                db.recoveryBin.worstTick.qty
-            );
-        }
-        if (sb.recoveryBin.worstTick) {
-            allQuoteTicks.push(sb.recoveryBin.worstTick);
-
-            maxQuoteTickQty = Math.max(
-                maxQuoteTickQty,
-                sb.recoveryBin.worstTick.qty
-            );
-        }
-
-        const quoteTicks: Map<number, number> = new Map();
-
-        for (const tick of allQuoteTicks) {
-            const idx = tick.tickIdx.toAbsolute();
-
-            const prev = quoteTicks.get(idx) ?? 0;
-            const qty = prev + tick.qty;
-            quoteTicks.set(idx, qty);
-
-            maxQuoteTickQty = Math.max(maxQuoteTickQty, qty);
-        }
-
-        // collect all liquidity from the current tick
-
-        const baseCurTick =
-            db.curTick.reserve +
-            dq.curTick.inventory +
-            sb.curTick.reserve +
-            sq.curTick.inventory;
-
-        maxBaseTickQty = Math.max(maxBaseTickQty, baseCurTick);
-
-        const quoteCurTick =
-            dq.curTick.reserve +
-            db.curTick.inventory +
-            sq.curTick.reserve +
-            sb.curTick.inventory;
-
-        maxQuoteTickQty = Math.max(maxQuoteTickQty, quoteCurTick);
-
-        // collect all collateral
-
-        const baseRecoveryBin =
-            dq.recoveryBin.collateral + sq.recoveryBin.collateral;
-        const quoteRecoveryBin =
-            db.recoveryBin.collateral + sb.recoveryBin.collateral;
-
-        // collect and verify current tick idx invariant
-
-        const curIdx = db.curTick.idx.toAbsolute();
-        if (
-            db.curTick.idx.toAbsolute() !== curIdx ||
-            dq.curTick.idx.toAbsolute() !== curIdx ||
-            sb.curTick.idx.toAbsolute() !== curIdx ||
-            sq.curTick.idx.toAbsolute() !== curIdx
-        ) {
-            panic(`Ticks don't match`);
-        }
-
-        return {
-            base: baseTicks,
-            quote: quoteTicks,
-            currentTick: {
-                idx: curIdx,
-                base: baseCurTick,
-                quote: quoteCurTick,
-            },
-            recoveryBinCollateral: {
-                base: baseRecoveryBin,
-                quote: quoteRecoveryBin,
-            },
-            maxBase: maxBaseTickQty,
-            maxQuote: maxQuoteTickQty,
-        };
     }
 
     /**
@@ -252,24 +84,38 @@ export class Pool {
         const fees = args.qtyIn * this.getFees();
         const qtyIn = args.qtyIn - fees;
 
+        /*     console.log(
+            `Incoming ${args.direction} swap, qty = ${qtyIn} ${
+                args.direction === "base -> quote" ? "base" : "quote"
+            }, fees = ${fees}, curtick: ${this.driftingAMM.base.curTick.index.toAbsolute()}`
+        ); */
+
         const stableFees = fees * STABLE_AMM_CUT;
         const driftingFees = fees - stableFees;
 
+        let qtyOut: number = 0;
+
         if (args.direction === "base -> quote") {
-            this.stableAMM["quote"].curTick().addInventoryFees(stableFees);
-            this.driftingAMM["quote"].curTick().addInventoryFees(driftingFees);
+            this.stableAMM["quote"].curTick.addInventoryFees(stableFees);
+            this.driftingAMM["quote"].curTick.addInventoryFees(driftingFees);
 
-            return {
-                qtyOut: this._swap(qtyIn, args.direction),
-            };
+            qtyOut = this._swap(qtyIn, args.direction);
         } else {
-            this.stableAMM["base"].curTick().addInventoryFees(stableFees);
-            this.driftingAMM["base"].curTick().addInventoryFees(driftingFees);
+            this.stableAMM["base"].curTick.addInventoryFees(stableFees);
+            this.driftingAMM["base"].curTick.addInventoryFees(driftingFees);
 
-            return {
-                qtyOut: this._swap(qtyIn, args.direction),
-            };
+            qtyOut = this._swap(qtyIn, args.direction);
         }
+
+        /*   console.log(
+            `Received ${qtyOut} ${
+                args.direction === "base -> quote" ? "quote" : "base"
+            }, curtick: ${this.driftingAMM.base.curTick.index.toAbsolute()}`
+        );
+ */
+        this.drift();
+
+        return { qtyOut };
     }
 
     /**
@@ -286,8 +132,15 @@ export class Pool {
 
         const oppositeSide = side === "base" ? "quote" : "base";
         const worstInventory =
-            this.driftingAMM[oppositeSide].getWorstInventoryTick();
-        const leftBound = worstInventory ? worstInventory.idx : undefined;
+            this.driftingAMM[oppositeSide].getRightInventoryTick();
+
+        const tenPercent =
+            this.driftingAMM[oppositeSide].curTick.index.clone(true);
+        tenPercent.sub(TEN_PERCENT_TICKS);
+
+        const leftBound = worstInventory
+            ? worstInventory.idx.clone()
+            : tenPercent;
 
         this.driftingAMM[side].deposit({ reserve: driftingCut, leftBound });
     }
@@ -348,16 +201,22 @@ export class Pool {
             [this.driftingAMM.quote, quoteDirection],
         ];
 
-        while (qtyIn > 0) {
+        while (!almostEq(qtyIn, 0)) {
             let hasAny = false;
 
             // Keep swapping with each AMM until it's fully exhausted
             for (const [amm, direction] of amms) {
-                while (qtyIn > 0) {
-                    const { qtyOut: q, reminderIn } = amm.curTick().swap({
+                while (!almostEq(qtyIn, 0)) {
+                    const {
+                        qtyOut: q,
+                        reminderIn,
+                        recoveredReserve,
+                    } = amm.curTick.swap({
                         direction,
                         qtyIn,
                     });
+
+                    amm.deposit({ reserve: recoveredReserve });
 
                     if (reminderIn < qtyIn) {
                         hasAny = true;
@@ -369,76 +228,29 @@ export class Pool {
                     }
                 }
 
-                if (qtyIn === 0) return qtyOut;
+                if (almostEq(qtyIn, 0)) return qtyOut;
             }
 
             // Check if we should move ticks
             // We can only move if ALL AMMs have exhausted the asset they PROVIDE
-            if (!hasAny && qtyIn > 0) {
-                // Verify AMMs are truly exhausted of what they provide
-                let canMove = true;
-
-                for (const [amm, dir] of amms) {
-                    const curTick = amm.curTick();
-
-                    // Check what asset this AMM PROVIDES (not consumes!)
-                    if (dir === "reserve -> inventory") {
-                        // Consumes reserve, PROVIDES inventory
-                        if (curTick.hasInventory()) {
-                            console.log(
-                                `Cannot move: AMM (${dir}) still has inventory to provide`
-                            );
-                            canMove = false;
-                            break;
-                        }
-                    } else {
-                        // Consumes inventory, PROVIDES reserve
-                        if (curTick.hasReserve()) {
-                            console.log(
-                                `Cannot move: AMM (${dir}) still has reserve to provide`
-                            );
-                            canMove = false;
-                            break;
-                        }
-                    }
-                }
-
-                if (!canMove) {
-                    // AMMs still have assets but swap() returned no progress
-                    // This might be due to price limits or IL recovery
-                    // For now, break to avoid infinite loop
-                    console.log(
-                        "Breaking: AMMs have assets but no progress made"
-                    );
-                    break;
-                }
-
-                // Move ALL AMMs together, passing their individual swap directions
-                // Move ALL AMMs together, passing their individual swap directions
+            if (!hasAny && !almostEq(qtyIn, 0)) {
+                // Move ALL AMMs together
                 if (direction === "base -> quote") {
-                    // Price Down
-                    baseDirection = "reserve -> inventory";
-                    quoteDirection = "inventory -> reserve";
+                    this.stableAMM.base.curTick.nextInventoryTick();
+                    this.driftingAMM.base.curTick.nextInventoryTick();
 
-                    this.stableAMM.base.curTick().increment(baseDirection);
-                    this.stableAMM.quote.curTick().decrement(quoteDirection);
-
-                    this.driftingAMM.base.curTick().increment(baseDirection);
-                    this.driftingAMM.quote.curTick().decrement(quoteDirection);
+                    this.stableAMM.quote.curTick.nextReserveTick();
+                    this.driftingAMM.quote.curTick.nextReserveTick();
                 } else {
-                    // Price Up
-                    baseDirection = "inventory -> reserve";
-                    quoteDirection = "reserve -> inventory";
+                    this.stableAMM.base.curTick.nextReserveTick();
+                    this.driftingAMM.base.curTick.nextReserveTick();
 
-                    this.stableAMM.base.curTick().decrement(baseDirection);
-                    this.stableAMM.quote.curTick().increment(quoteDirection);
-
-                    this.driftingAMM.base.curTick().decrement(baseDirection);
-                    this.driftingAMM.quote.curTick().increment(quoteDirection);
+                    this.stableAMM.quote.curTick.nextInventoryTick();
+                    this.driftingAMM.quote.curTick.nextInventoryTick();
                 }
 
                 const indices = amms.map(([it, _]) =>
-                    Math.abs(it.curTick().index().index())
+                    Math.abs(it.curTick.index.index())
                 );
                 const allSame = indices.every((idx) => idx === indices[0]);
                 if (!allSame) {
@@ -447,8 +259,7 @@ export class Pool {
                     );
                 }
             } else if (!hasAny) {
-                // No progress and no qty left - swap complete (shouldn't happen)
-                break;
+                panic("No progress and no qty left - swap complete");
             }
         }
 
@@ -456,30 +267,226 @@ export class Pool {
     }
 
     /**
+     * Calculates the average impermanent loss (IL) across all AMMs in the pool.
+     * @returns The average IL as a percentage (0 to 1).
+     */
+    public getAvgIl(): number {
+        const totalReserve0 =
+            this.stableAMM.base.getDepositedReserve() +
+            this.driftingAMM.base.getDepositedReserve();
+
+        const il01 =
+            (this.stableAMM.base.il *
+                this.stableAMM.base.getDepositedReserve()) /
+            totalReserve0;
+
+        const il02 =
+            (this.driftingAMM.base.il *
+                this.driftingAMM.base.getDepositedReserve()) /
+            totalReserve0;
+
+        const il0 = il01 + il02;
+
+        const totalReserve1 =
+            this.stableAMM.quote.getDepositedReserve() +
+            this.driftingAMM.quote.getDepositedReserve();
+
+        const il11 =
+            (this.stableAMM.quote.il *
+                this.stableAMM.quote.getDepositedReserve()) /
+            totalReserve1;
+
+        const il12 =
+            (this.driftingAMM.quote.il *
+                this.driftingAMM.quote.getDepositedReserve()) /
+            totalReserve1;
+
+        const il1 = il11 + il12;
+
+        return (il0 + il1) / 2;
+    }
+
+    /**
+     * Calculates the dynamic fees for a swap based on the average impermanent loss.
+     * The higher the IL, the higher the fees.
+     * @returns The fee rate as a percentage (0 to 1).
+     */
+    public getFees(): number {
+        const il = this.getAvgIl();
+        return this.calculateFees(il);
+    }
+
+    private calculateFees(il: number): number {
+        return MIN_FEES + (il <= 0.9 ? (MAX_FEES * il) / 0.9 : MAX_FEES);
+    }
+
+    public getLiquidityDigest(tickSpan: number): LiquidityDigestAbsolute {
+        const db = this.driftingAMM.base.getLiquidityDigest(tickSpan);
+        const dq = this.driftingAMM.quote.getLiquidityDigest(tickSpan);
+        const sb = this.stableAMM.base.getLiquidityDigest(tickSpan);
+        const sq = this.stableAMM.quote.getLiquidityDigest(tickSpan);
+
+        let maxBaseTickQty = 0;
+
+        // combining all base ticks
+
+        const allBaseTicks = [
+            ...db.reserve,
+            ...dq.inventory,
+            ...sb.reserve,
+            ...sq.inventory,
+        ];
+        const baseTicks: OrderedMap<number, number> = new OrderedMap();
+
+        for (const tick of allBaseTicks) {
+            const idx = tick.tickIdx.toAbsolute();
+
+            const prev = baseTicks.getElementByKey(idx) ?? 0;
+            const qty = prev + tick.qty;
+            baseTicks.setElement(idx, qty);
+
+            maxBaseTickQty = Math.max(maxBaseTickQty, qty);
+        }
+
+        // combining all quote ticks
+
+        const allQuoteTicks = [
+            ...dq.reserve,
+            ...db.inventory,
+            ...sq.reserve,
+            ...sb.inventory,
+        ];
+        const quoteTicks: OrderedMap<number, number> = new OrderedMap();
+
+        for (const tick of allQuoteTicks) {
+            const idx = tick.tickIdx.toAbsolute();
+
+            const prev = quoteTicks.getElementByKey(idx) ?? 0;
+            const qty = prev + tick.qty;
+            quoteTicks.setElement(idx, qty);
+
+            const repsectiveBaseQty = qty / tickToPrice(idx);
+            maxBaseTickQty = Math.max(maxBaseTickQty, repsectiveBaseQty);
+        }
+
+        // collect and verify current tick idx invariant
+
+        const curIdx = db.curTick.idx.toAbsolute();
+        if (
+            db.curTick.idx.toAbsolute() !== curIdx ||
+            dq.curTick.idx.toAbsolute() !== curIdx ||
+            sb.curTick.idx.toAbsolute() !== curIdx ||
+            sq.curTick.idx.toAbsolute() !== curIdx
+        ) {
+            panic(`Ticks don't match`);
+        }
+
+        // collect all liquidity from the current tick
+
+        const baseCurTickLiq =
+            db.curTick.reserve +
+            dq.curTick.inventory +
+            sb.curTick.reserve +
+            sq.curTick.inventory;
+
+        const quoteCurTickLiq =
+            dq.curTick.reserve +
+            db.curTick.inventory +
+            sq.curTick.reserve +
+            sb.curTick.inventory;
+
+        // collect all collateral
+
+        const baseRecoveryBin =
+            dq.recoveryBin.collateral + sq.recoveryBin.collateral;
+        const quoteRecoveryBin =
+            db.recoveryBin.collateral + sb.recoveryBin.collateral;
+
+        return {
+            base: baseTicks,
+            quote: quoteTicks,
+            currentTick: {
+                idx: curIdx,
+                base: baseCurTickLiq,
+                quote: quoteCurTickLiq,
+            },
+            recoveryBinCollateral: {
+                base: baseRecoveryBin,
+                quote: quoteRecoveryBin,
+            },
+            maxBase: maxBaseTickQty,
+        };
+    }
+
+    /**
      * Creates a new `Pool`.
      * @param curTickIdx The initial tick index for the pool.
      */
-    constructor(curTickIdx: number) {
-        // Base is Inverted (Relative = -Absolute)
+    constructor(
+        curTickIdx: number,
+        args?: {
+            baseQty: number;
+            quoteQty: number;
+            tickSpan: number;
+        }
+    ) {
         const baseTickIdx = new TickIndex(true, -curTickIdx);
-        // Quote is Normal (Relative = Absolute)
-        const quoteTickIdx = new TickIndex(false, curTickIdx);
+        const quoteTickIdx = baseTickIdx.clone(true);
 
-        this.stableAMM = {
-            base: new AMM(baseTickIdx),
-            quote: new AMM(quoteTickIdx),
-        };
+        if (args) {
+            const baseHalf = args.baseQty / 2;
+            const sbr = baseHalf * STABLE_AMM_CUT;
+            const dbr = baseHalf - sbr;
+            const sqi = sbr;
+            const dqi = dbr;
 
-        this.driftingAMM = {
-            base: new AMM(baseTickIdx),
-            quote: new AMM(quoteTickIdx),
-        };
+            const quoteHalf = args.quoteQty / 2;
+            const sqr = quoteHalf * STABLE_AMM_CUT;
+            const dqr = quoteHalf - sqr;
+            const sbi = sqr;
+            const dbi = dqr;
+
+            this.stableAMM = {
+                base: new AMM(baseTickIdx.clone(), {
+                    reserveQty: sbr,
+                    inventoryQty: sbi,
+                    tickSpan: args.tickSpan,
+                }),
+                quote: new AMM(quoteTickIdx.clone(), {
+                    reserveQty: sqr,
+                    inventoryQty: sqi,
+                    tickSpan: args.tickSpan,
+                }),
+            };
+
+            this.driftingAMM = {
+                base: new AMM(baseTickIdx.clone(), {
+                    reserveQty: dbr,
+                    inventoryQty: dbi,
+                    tickSpan: args.tickSpan,
+                }),
+                quote: new AMM(quoteTickIdx.clone(), {
+                    reserveQty: dqr,
+                    inventoryQty: dqi,
+                    tickSpan: args.tickSpan,
+                }),
+            };
+        } else {
+            this.stableAMM = {
+                base: new AMM(baseTickIdx.clone()),
+                quote: new AMM(quoteTickIdx.clone()),
+            };
+            this.driftingAMM = {
+                base: new AMM(baseTickIdx.clone()),
+                quote: new AMM(quoteTickIdx.clone()),
+            };
+        }
     }
 }
 
-export type LiquidityAbsolute = {
-    base: Map<number, number>;
-    quote: Map<number, number>;
+export type LiquidityDigestAbsolute = {
+    base: OrderedMap<number, number>;
+    quote: OrderedMap<number, number>;
     currentTick: {
         idx: number;
         base: number;
@@ -490,5 +497,4 @@ export type LiquidityAbsolute = {
         quote: number;
     };
     maxBase: number;
-    maxQuote: number;
 };

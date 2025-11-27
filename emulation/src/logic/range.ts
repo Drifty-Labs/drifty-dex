@@ -1,5 +1,5 @@
 import { TickIndex } from "./ticks.ts";
-import { BASE_PRICE, panic } from "./utils.ts";
+import { almostEq, BASE_PRICE, panic } from "./utils.ts";
 
 /**
  * The result of taking a tick from a range.
@@ -42,7 +42,7 @@ export abstract class Range {
 
     public isEmpty() {
         const empty = this.width <= 0;
-        if (empty && this.qty > 0)
+        if (empty && !almostEq(this.qty, 0))
             panic(
                 `The range is empty, but there is still ${this.qty} liquidity`
             );
@@ -73,6 +73,14 @@ export class ReserveRange extends Range {
         super(qty, left, right);
     }
 
+    public clone() {
+        return new ReserveRange(
+            this.qty,
+            this.left.clone(),
+            this.right.clone()
+        );
+    }
+
     public override unpack(curTick: TickIndex, tickSpan: number): TakeResult[] {
         const result: TakeResult[] = [];
 
@@ -94,6 +102,15 @@ export class ReserveRange extends Range {
         this.qty += qty;
     }
 
+    public putBest(qty: number): TickIndex {
+        this.assertNonEmpty();
+
+        this.qty += qty;
+        this.right.inc();
+
+        return this.right.clone();
+    }
+
     public withdrawCut(cut: number): number {
         this.assertNonEmpty();
 
@@ -104,7 +121,6 @@ export class ReserveRange extends Range {
     }
 
     public override takeBest(): TakeResult {
-        // console.log(`ReserveRange.takeBest: qty=${this.qty}, width=${this.width}, right=${this.right.index()}`);
         this.assertNonEmpty();
 
         const qty = this.qty / this.width;
@@ -172,6 +188,24 @@ export class ReserveRange extends Range {
         this.left = newLeft.clone();
     }
 
+    public setRight(newRight: TickIndex) {
+        this.assertNonEmpty();
+
+        if (newRight.lt(this.right)) {
+            panic(
+                `New right ${newRight.index()} should be bigger than old right ${this.right.index()}`
+            );
+        }
+
+        if (newRight.lt(this.left)) {
+            panic(
+                `New right ${newRight.index()} should be bigger than left ${this.left.index()}`
+            );
+        }
+
+        this.right = newRight.clone();
+    }
+
     public getLeft(): TickIndex {
         this.assertNonEmpty();
         return this.left.clone();
@@ -194,12 +228,19 @@ export class InventoryRange extends Range {
         super(qty, left, right);
     }
 
+    public clone() {
+        return new InventoryRange(
+            this.qty,
+            this.left.clone(),
+            this.right.clone()
+        );
+    }
+
     public override unpack(curTick: TickIndex, tickSpan: number): TakeResult[] {
         const result: TakeResult[] = [];
 
         if (!this.isEmpty()) {
             let qty = this.bestTickQty();
-            let sum = qty;
 
             for (const i = this.left.clone(); i.le(this.right); i.inc()) {
                 if (i.distance(curTick) > tickSpan) break;
@@ -207,11 +248,23 @@ export class InventoryRange extends Range {
                 result.push({ qty, tickIdx: i.clone() });
 
                 qty *= BASE_PRICE;
-                sum += qty;
             }
         }
 
         return result;
+    }
+
+    // TODO: do with a formula
+    public calcRespectiveReserve() {
+        let qty = this.bestTickQty();
+        let sum = 0;
+
+        for (const i = this.left.clone(); i.le(this.right); i.inc()) {
+            sum += qty / i.price;
+            qty *= BASE_PRICE;
+        }
+
+        return sum;
     }
 
     public override takeBest(): TakeResult {

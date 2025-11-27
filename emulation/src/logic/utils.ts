@@ -18,13 +18,10 @@ export const TEN_PERCENT_TICKS = 954;
 /**
  * Converts a tick index to a price.
  * @param tick The tick index.
- * @param side The side of the pool (`base` or `quote`).
  * @returns The price.
  */
-export function tickToPrice(tick: number, side: Side): number {
-    return side === "base"
-        ? Math.pow(BASE_PRICE, tick)
-        : 1 / Math.pow(BASE_PRICE, tick);
+export function tickToPrice(tick: number): number {
+    return Math.pow(BASE_PRICE, tick);
 }
 
 /**
@@ -83,4 +80,12 @@ export function twoSided<T>(base: T, quote: T): TwoSided<T> {
  */
 export function panic(msg?: string): never {
     throw new Error(`Panicked: ${msg}`);
+}
+
+export function almostEq(
+    a: number,
+    b: number,
+    eps: number = 0.00000001
+): boolean {
+    return Math.abs(a - b) < eps;
 }
