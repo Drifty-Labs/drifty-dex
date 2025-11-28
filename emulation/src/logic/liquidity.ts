@@ -111,9 +111,7 @@ export class Reserve {
     }
 
     public get qty(): number {
-        this.assertInitted();
-
-        return this.range!.getQty();
+        return this.range?.getQty() ?? 0;
     }
 
     public isInitted() {
@@ -314,7 +312,7 @@ export class Inventory {
     }
 
     public isEmpty() {
-        return almostEq(this.ranges.length, 0);
+        return this.ranges.length === 0;
     }
 
     public unpack(curTick: TickIndex, tickSpan: number): TakeResult[] {
@@ -360,11 +358,6 @@ export class Liquidity {
         const inventoryRight = tickSpan
             ? inventoryLeft.clone().add(tickSpan)
             : curTickIdx.max();
-
-        console.log(
-            reserveLeft.distance(reserveRight),
-            inventoryLeft.distance(inventoryRight)
-        );
 
         this.reserve.init(reserveQty, reserveLeft, reserveRight);
         return this.inventory.init(inventoryQty, inventoryLeft, inventoryRight);

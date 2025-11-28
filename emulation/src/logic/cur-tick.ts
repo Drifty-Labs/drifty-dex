@@ -152,8 +152,7 @@ export class CurrentTick {
     }
 
     public nextReserveTick() {
-        if (this.currentReserve !== 0) {
-            console.log(this.name, this);
+        if (!almostEq(this.currentReserve, 0)) {
             panic(
                 "Switching to next reserve tick is only possible when the previous one is empty"
             );
@@ -178,8 +177,7 @@ export class CurrentTick {
     }
 
     public nextInventoryTick() {
-        if (this.currentInventory !== 0) {
-            console.log(this.name, this);
+        if (!almostEq(this.currentInventory, 0)) {
             panic(
                 "Switching to next inventory tick is only possible when the previous one is empty"
             );
@@ -214,11 +212,11 @@ export class CurrentTick {
     public withdrawCut(cut: number): WithdrawResult {
         const reserve = this.currentReserve * cut;
         this.currentReserve -= reserve;
-        this.targetReserve *= cut;
+        this.targetReserve *= 1 - cut;
 
         const inventory = this.currentInventory * cut;
         this.currentInventory -= inventory;
-        this.targetInventory *= cut;
+        this.targetInventory *= 1 - cut;
 
         const recoveryBinInventory = this.recoveryBin.withdrawCut(cut);
 
@@ -346,6 +344,11 @@ export class RecoveryBin {
                 };
         }
 
+        // guarantees no division by zero
+        if (this.worstTick.idx.eq(args.curTickIdx)) {
+            panic("Impossible to fix worst tick when it is current tick");
+        }
+
         // Raw prices for ratio calculations
         const p0 = this.worstTick.idx.price;
         const p1 = args.curTickIdx.price;
@@ -386,7 +389,6 @@ export class RecoveryBin {
         this.worstTick.inventory -= dI;
 
         if (almostEq(this.worstTick.inventory, 0)) {
-            console.log(`[${this.name}] Recovered worst tick`);
             this.worstTick = undefined;
         } else {
             this.liquidity.getInventory().putRightNewRange(this.worstTick);

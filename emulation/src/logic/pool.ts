@@ -29,8 +29,12 @@ export class Pool {
     private stableAMM: TwoSided<AMM>;
     private driftingAMM: TwoSided<AMM>;
 
-    public clone() {
-        const p = new Pool(this.driftingAMM.base.curTick.index.toAbsolute());
+    public clone(epheremal: boolean) {
+        const p = new Pool(
+            this.tickSpan,
+            this.driftingAMM.base.curTick.index.toAbsolute(),
+            epheremal
+        );
 
         p.stableAMM.base = this.stableAMM.base.clone();
         p.stableAMM.quote = this.stableAMM.quote.clone();
@@ -103,13 +107,9 @@ export class Pool {
         const worstInventory =
             this.driftingAMM[oppositeSide].getRightInventoryTick();
 
-        const tenPercent =
-            this.driftingAMM[oppositeSide].curTick.index.clone(true);
-        tenPercent.sub(TEN_PERCENT_TICKS);
-
         const leftBound = worstInventory
             ? worstInventory.idx.clone()
-            : tenPercent;
+            : this.driftingAMM[side].curTick.index.sub(this.tickSpan);
 
         this.driftingAMM[side].deposit({ reserve: driftingCut, leftBound });
     }
@@ -168,7 +168,10 @@ export class Pool {
                 } */
 
                 if (recoveredReserve > 0) {
-                    amm.deposit({ reserve: recoveredReserve });
+                    amm.deposit({
+                        reserve: recoveredReserve,
+                        leftBound: amm.curTick.index.sub(this.tickSpan),
+                    });
                 }
 
                 if (reminderIn < qtyIn) {
@@ -214,7 +217,22 @@ export class Pool {
 
         return qtyOut;
     }
+
+    public getCurAbsoluteTick(): number {
+        return this.driftingAMM.base.curTick.index.toAbsolute();
+    }
+
+    public getDepositedReserves(): TwoSided<number> {
+        return {
+            base: this.driftingAMM.base.getDepositedReserve(),
+            quote: this.driftingAMM.quote.getDepositedReserve(),
+        };
+    }
+
     public getAvgImpermanentLoss(): number {
+        // TODO: IL is calculated on a false assumption that if we sell the inventory right now we get less reserve
+        // TODO: double check that, this might be an issue with the price and stuff
+
         const totalReserve0 =
             this.stableAMM.base.getDepositedReserve() +
             this.driftingAMM.base.getDepositedReserve();
@@ -357,16 +375,56 @@ export class Pool {
         };
     }
 
+    public getStats(): TwoSided<{
+        depositedReserve: number;
+        actualReserve: number;
+        actualInventory: number;
+        respectiveReserve: number;
+    }> {
+        const base = {
+            depositedReserve:
+                this.driftingAMM.base.getDepositedReserve() +
+                this.stableAMM.base.getDepositedReserve(),
+            actualReserve:
+                this.driftingAMM.base.getActualReserve() +
+                this.stableAMM.base.getActualReserve(),
+            actualInventory:
+                this.driftingAMM.base.getActualInventory() +
+                this.stableAMM.base.getActualInventory(),
+            respectiveReserve:
+                this.driftingAMM.base.getRespectiveReserve() +
+                this.stableAMM.base.getRespectiveReserve(),
+        };
+
+        const quote = {
+            depositedReserve:
+                this.driftingAMM.quote.getDepositedReserve() +
+                this.stableAMM.quote.getDepositedReserve(),
+            actualReserve:
+                this.driftingAMM.quote.getActualReserve() +
+                this.stableAMM.quote.getActualReserve(),
+            actualInventory:
+                this.driftingAMM.quote.getActualInventory() +
+                this.stableAMM.quote.getActualInventory(),
+            respectiveReserve:
+                this.driftingAMM.quote.getRespectiveReserve() +
+                this.stableAMM.quote.getRespectiveReserve(),
+        };
+
+        return { base, quote };
+    }
+
     /**
      * Creates a new `Pool`.
      * @param curTickIdx The initial tick index for the pool.
      */
     constructor(
         curTickIdx: number,
+        private tickSpan: number,
+        private epheremal: boolean,
         args?: {
             baseQty: number;
             quoteQty: number;
-            tickSpan: number;
         }
     ) {
         const baseTickIdx = new TickIndex(true, -curTickIdx);
@@ -397,12 +455,12 @@ export class Pool {
                 base: new AMM("DriftingBase", baseTickIdx.clone(), {
                     reserveQty: dbr,
                     inventoryQty: dbi,
-                    tickSpan: args.tickSpan,
+                    tickSpan: tickSpan,
                 }),
                 quote: new AMM("DriftingQuote", quoteTickIdx.clone(), {
                     reserveQty: dqr,
                     inventoryQty: dqi,
-                    tickSpan: args.tickSpan,
+                    tickSpan: tickSpan,
                 }),
             };
         } else {

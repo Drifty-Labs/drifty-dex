@@ -159,8 +159,7 @@ export class AMM {
 
     public drift(targetLeft: TickIndex) {
         if (!this.liquidity.getReserve().isInitted()) return;
-
-        console.log(`[${this.name}] Drifting to ${targetLeft.toAbsolute()}`);
+        if (this.liquidity.getReserve().peekLeft()?.idx.eq(targetLeft)) return;
 
         this.liquidity.driftReserve(targetLeft);
     }
@@ -219,6 +218,28 @@ export class AMM {
 
     public getDepositedReserve(): number {
         return this.depositedReserve;
+    }
+
+    public getActualReserve(): number {
+        return (
+            this.liquidity.getReserve().qty +
+            this.curTick.getLiquidity().reserve
+        );
+    }
+
+    public getActualInventory(): number {
+        return (
+            this.liquidity.getInventory().qty +
+            this.curTick.getLiquidity().inventory
+        );
+    }
+
+    public getRespectiveReserve(): number {
+        return (
+            this.liquidity.getInventory().respectiveReserve +
+            this.curTick.getLiquidity().inventory *
+                tickToPrice(this.curTick.index, "inventory")
+        );
     }
 
     public toString() {
