@@ -224,8 +224,8 @@ Deno.test("Pool - Full Simulation (Round Trip)", () => {
     assertEquals(finalTick > midTick, true, "Should have moved price up");
 
     // Check IL / Fees
-    const avgIl = pool.getAvgIl();
+    const avgIl = pool.getAvgImpermanentLoss();
     const fees = pool.getFees();
-    console.log(`Average IL: ${pool.getAvgIl()}`);
+    console.log(`Average IL: ${pool.getAvgImpermanentLoss()}`);
     console.log(`Current Fees: ${pool.getFees()}`);
 });

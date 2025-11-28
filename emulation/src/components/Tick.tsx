@@ -1,4 +1,4 @@
-import { tickToPrice } from "../logic/utils.ts";
+import { absoluteTickToPrice } from "../logic/utils.ts";
 
 export type TickProps = {
     qty: number;
@@ -14,7 +14,9 @@ export function Tick(props: TickProps) {
     };
 
     const qty = () =>
-        props.isBase ? props.qty : props.qty / tickToPrice(props.idx);
+        props.isBase
+            ? props.qty
+            : props.qty * absoluteTickToPrice(props.idx, "quote");
 
     const height = () => Math.max((qty() * 80) / props.maxQty, 1);
 
@@ -45,7 +47,7 @@ export type CurTickProps = {
 };
 
 export function CurTick(props: CurTickProps) {
-    const quote = () => props.quote / tickToPrice(props.idx);
+    const quote = () => props.quote * absoluteTickToPrice(props.idx, "quote");
     const max = () => quote() + props.base;
 
     const quoteHeight = () => Math.max((quote() * 80) / max(), 1);
@@ -56,6 +58,7 @@ export function CurTick(props: CurTickProps) {
             data-idx={props.idx}
             class="h-full relative flex flex-row items-end"
             style={{ width: `${props.widthPx}px` }}
+            onclick={() => console.log(props)}
         >
             <div
                 class="w-1/2"

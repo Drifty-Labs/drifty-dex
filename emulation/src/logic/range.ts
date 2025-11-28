@@ -1,5 +1,5 @@
 import { TickIndex } from "./ticks.ts";
-import { almostEq, BASE_PRICE, panic } from "./utils.ts";
+import { almostEq, panic, tickToPrice } from "./utils.ts";
 
 /**
  * The result of taking a tick from a range.
@@ -11,11 +11,6 @@ export type TakeResult = {
     tickIdx: TickIndex;
 };
 
-/**
- * Base helper for managing a contiguous set of ticks that share liquidity.
- * Concrete subclasses decide how liquidity is distributed (uniform for
- * reserves, geometric for inventory) but rely on the same take/width rules.
- */
 export abstract class Range {
     constructor(
         protected qty: number,
@@ -23,9 +18,7 @@ export abstract class Range {
         protected right: TickIndex
     ) {}
 
-    /** Takes the tick closest to the current price. */
     public abstract takeBest(): TakeResult;
-    /** Takes the tick furthest away from price. */
     public abstract takeWorst(): TakeResult;
 
     public abstract unpack(curTick: TickIndex, tickSpan: number): TakeResult[];
@@ -58,11 +51,6 @@ export abstract class Range {
     }
 }
 
-/**
- * Uniform-liquidity range used for reserves (left of price). Every tick holds
- * the same amount, so `takeBest` consumes from the closest right boundary while
- * `takeWorst` consumes from the left.
- */
 export class ReserveRange extends Range {
     constructor(qty: number, left: TickIndex, right: TickIndex) {
         if (left.gt(right))
@@ -212,12 +200,6 @@ export class ReserveRange extends Range {
     }
 }
 
-/**
- * Geometrically weighted range used for inventory (right of price). The left
- * boundary is the lowest price tick (closest to price), while the right bound
- * is the highest. Tokens nearer to price get smaller allocations so the overall
- * value stays constant as the range widens.
- */
 export class InventoryRange extends Range {
     constructor(qty: number, left: TickIndex, right: TickIndex) {
         if (left.gt(right))
@@ -241,13 +223,16 @@ export class InventoryRange extends Range {
 
         if (!this.isEmpty()) {
             let qty = this.bestTickQty();
+            const ratio = this.perTickPriceRatio();
 
             for (const i = this.left.clone(); i.le(this.right); i.inc()) {
                 if (i.distance(curTick) > tickSpan) break;
 
                 result.push({ qty, tickIdx: i.clone() });
 
-                qty *= BASE_PRICE;
+                qty *= ratio;
+
+                if (i.eq(this.right)) break;
             }
         }
 
@@ -257,11 +242,14 @@ export class InventoryRange extends Range {
     // TODO: do with a formula
     public calcRespectiveReserve() {
         let qty = this.bestTickQty();
+        const ratio = this.perTickPriceRatio();
         let sum = 0;
 
         for (const i = this.left.clone(); i.le(this.right); i.inc()) {
-            sum += qty / i.price;
-            qty *= BASE_PRICE;
+            sum += qty * tickToPrice(i, "inventory");
+            qty *= ratio;
+
+            if (i.eq(this.right)) break;
         }
 
         return sum;
@@ -337,14 +325,24 @@ export class InventoryRange extends Range {
         if (!this.left.eq(curTick)) panic("Invalid inventory cur tick");
     }
 
-    private bestTickQty() {
-        return (
-            (this.qty * (BASE_PRICE - 1)) /
-            (Math.pow(BASE_PRICE, this.width) - 1)
-        );
+    private perTickPriceRatio(): number {
+        if (this.width <= 1) return 1;
+
+        // Total price ratio from best (left) to worst (right)
+        const totalPriceRatio = this.right.price / this.left.price;
+        // Per-tick ratio is the (width-1)th root of total ratio
+        return Math.pow(totalPriceRatio, 1 / (this.width - 1));
     }
 
-    private worstTickQty() {
-        return this.bestTickQty() * Math.pow(BASE_PRICE, this.width - 1);
+    private bestTickQty(): number {
+        const r = this.perTickPriceRatio();
+        if (almostEq(r, 1)) return this.qty;
+
+        return (this.qty * (r - 1)) / (Math.pow(r, this.width) - 1);
+    }
+
+    private worstTickQty(): number {
+        const r = this.perTickPriceRatio();
+        return this.bestTickQty() * Math.pow(r, this.width - 1);
     }
 }

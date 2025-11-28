@@ -5,7 +5,7 @@ import {
     type WithdrawResult,
 } from "./liquidity.ts";
 import { TickIndex } from "./ticks.ts";
-import { almostEq, panic } from "./utils.ts";
+import { almostEq, panic, tickToPrice } from "./utils.ts";
 
 export type AMMSwapDirection = "reserve -> inventory" | "inventory -> reserve";
 
@@ -21,18 +21,6 @@ export type CurrentTickSwapResult = {
     recoveredReserve: number;
 };
 
-/**
- * Captures the state of the currently active tick for a single AMM side.
- *
- * It is the only mutable location that swaps touch directly. All other ticks
- * live either in the {@link Reserve} (to the left of price) or {@link Inventory}
- * (to the right of price). As swaps consume one side, {@link CurrentTick}
- * requests a fresh chunk from the respective structure and advances the tick
- * index.
- *
- * The class also hosts the {@link RecoveryBin} responsible for fee-funded IL
- * recovery before regular inventory is touched.
- */
 export class CurrentTick {
     private targetReserve: number = 0;
     private currentReserve: number = 0;
@@ -43,7 +31,7 @@ export class CurrentTick {
     private recoveryBin: RecoveryBin;
 
     public clone(newLiquidity: Liquidity) {
-        const c = new CurrentTick(this.idx.clone(), newLiquidity);
+        const c = new CurrentTick(this.name, this.idx.clone(), newLiquidity);
 
         c.targetReserve = this.targetReserve;
         c.currentReserve = this.currentReserve;
@@ -61,26 +49,10 @@ export class CurrentTick {
         };
     }
 
-    /**
-     * Adds fees to the recovery bin to be used as collateral for IL recovery.
-     * @param fees The amount of fees to add.
-     */
     public addInventoryFees(fees: number) {
         this.recoveryBin.addCollateral(fees);
     }
 
-    /**
-     * Executes a swap within the current tick.
-     *
-     * Steps for `reserve -> inventory`:
-     * 1. Let {@link RecoveryBin} try to match the input with the worst underwater
-     *    tick plus accumulated collateral.
-     * 2. If recovery does not exhaust the input, consume the live inventory and
-     *    track how much reserve remains for the outer {@link Pool} loop.
-     *
-     * For `inventory -> reserve`, only the live reserve is used. Any leftover
-     * inventory is bubbled up so the pool can decrement ticks and continue.
-     */
     public swap(args: CurrentTickSwapArgs): CurrentTickSwapResult {
         if (args.direction === "reserve -> inventory") {
             // first try to recover as much IL as possible
@@ -107,7 +79,8 @@ export class CurrentTick {
                     recoveredReserve,
                 };
 
-            const needsInventory = reminderReserveIn * this.idx.price;
+            const needsInventory =
+                reminderReserveIn * tickToPrice(this.idx, "reserve");
 
             // if we consume the tick only partially, leave early
             if (needsInventory < this.currentInventory) {
@@ -126,7 +99,8 @@ export class CurrentTick {
 
             const getsInventory = this.currentInventory;
             const reminderInventory = needsInventory - getsInventory;
-            const reminderReserve = reminderInventory / this.idx.price;
+            const reminderReserve =
+                reminderInventory * tickToPrice(this.idx, "inventory");
 
             this.currentReserve += reminderReserveIn - reminderReserve;
             this.currentInventory = 0; // Fully consumed
@@ -147,7 +121,7 @@ export class CurrentTick {
                 recoveredReserve: 0,
             };
 
-        const needsReserve = args.qtyIn / this.idx.price;
+        const needsReserve = args.qtyIn * tickToPrice(this.idx, "inventory");
 
         if (needsReserve < this.currentReserve) {
             this.currentReserve -= needsReserve;
@@ -163,7 +137,8 @@ export class CurrentTick {
 
         const getsReserve = this.currentReserve;
         const reminderReserve = needsReserve - getsReserve;
-        const reminderInventory = reminderReserve * this.idx.price;
+        const reminderInventory =
+            reminderReserve * tickToPrice(this.idx, "reserve");
 
         this.currentReserve = 0;
         this.currentInventory += args.qtyIn - reminderInventory;
@@ -177,10 +152,12 @@ export class CurrentTick {
     }
 
     public nextReserveTick() {
-        if (this.currentReserve !== 0)
+        if (this.currentReserve !== 0) {
+            console.log(this.name, this);
             panic(
                 "Switching to next reserve tick is only possible when the previous one is empty"
             );
+        }
 
         const inventoryTick: InventoryTick | undefined = almostEq(
             this.targetInventory,
@@ -201,10 +178,12 @@ export class CurrentTick {
     }
 
     public nextInventoryTick() {
-        if (this.currentInventory !== 0)
+        if (this.currentInventory !== 0) {
+            console.log(this.name, this);
             panic(
                 "Switching to next inventory tick is only possible when the previous one is empty"
             );
+        }
 
         const reserveTick: ReserveTick | undefined = almostEq(
             this.targetReserve,
@@ -220,24 +199,18 @@ export class CurrentTick {
             reserveTick,
             this.idx.clone()
         );
+
         if (inventoryTick) this.putInventoryTick(inventoryTick);
     }
 
-    /**
-     * Deposits reserve into the current tick and recomputes the target
-     * inventory value the tick wants to hold to remain balanced.
-     */
     public deposit(reserve: number) {
         this.targetReserve += reserve;
         this.currentReserve += reserve;
 
-        this.targetInventory = this.targetReserve * this.idx.price;
+        this.targetInventory =
+            this.targetReserve * tickToPrice(this.idx, "reserve");
     }
 
-    /**
-     * Withdraws a proportional slice of the tick’s reserve/inventory plus the
-     * recovery bin collateral.
-     */
     public withdrawCut(cut: number): WithdrawResult {
         const reserve = this.currentReserve * cut;
         this.currentReserve -= reserve;
@@ -252,10 +225,6 @@ export class CurrentTick {
         return { reserve, inventory: inventory + recoveryBinInventory };
     }
 
-    /**
-     * Returns a clone of the current tick index.
-     * @returns The cloned tick index.
-     */
     public get index(): TickIndex {
         return this.idx.clone();
     }
@@ -264,18 +233,10 @@ export class CurrentTick {
         return this.currentInventory > 0;
     }
 
-    /**
-     * Checks if this tick has any reserve available.
-     * Used to determine when to move ticks during swaps.
-     */
     public hasReserve(): boolean {
         return this.currentReserve > 0;
     }
 
-    /**
-     * Resets the current tick’s accumulators before loading data for the next
-     * price level.
-     */
     private cleanup() {
         this.targetInventory = 0;
         this.targetReserve = 0;
@@ -289,7 +250,8 @@ export class CurrentTick {
         this.targetInventory += tick.inventory;
         this.currentInventory += tick.inventory;
 
-        this.targetReserve = this.targetInventory / this.idx.price;
+        this.targetReserve =
+            this.targetInventory * tickToPrice(this.idx, "inventory");
     }
 
     private putReserveTick(tick: ReserveTick) {
@@ -298,15 +260,20 @@ export class CurrentTick {
         this.targetReserve += tick.reserve;
         this.currentReserve += tick.reserve;
 
-        this.targetInventory = this.targetReserve * this.idx.price;
+        this.targetInventory =
+            this.targetReserve * tickToPrice(this.idx, "reserve");
     }
 
     public getRecoveryBin() {
         return this.recoveryBin;
     }
 
-    constructor(private idx: TickIndex, private liquidity: Liquidity) {
-        this.recoveryBin = new RecoveryBin(liquidity);
+    constructor(
+        private name: string,
+        private idx: TickIndex,
+        private liquidity: Liquidity
+    ) {
+        this.recoveryBin = new RecoveryBin(name, liquidity);
     }
 }
 
@@ -329,7 +296,7 @@ export class RecoveryBin {
     private worstTick: InventoryTick | undefined = undefined;
 
     public clone(newLiquidity: Liquidity) {
-        const r = new RecoveryBin(newLiquidity);
+        const r = new RecoveryBin(this.name, newLiquidity);
 
         r.collateral = this.collateral;
         r.worstTick = this.worstTick
@@ -379,6 +346,7 @@ export class RecoveryBin {
                 };
         }
 
+        // Raw prices for ratio calculations
         const p0 = this.worstTick.idx.price;
         const p1 = args.curTickIdx.price;
         const I = this.worstTick.inventory;
@@ -387,7 +355,8 @@ export class RecoveryBin {
         const dI = Math.min(I, (X * p1) / Math.abs(p1 - p0));
 
         const hasInventory = this.collateral + dI;
-        const needsInventory = args.reserveIn * p1;
+        const needsInventory =
+            args.reserveIn * tickToPrice(args.curTickIdx, "reserve");
 
         if (hasInventory > needsInventory) {
             const leftoverInventory = hasInventory - needsInventory;
@@ -410,12 +379,14 @@ export class RecoveryBin {
         }
 
         const takeInventory = hasInventory;
-        const takeReserve = takeInventory / p1;
+        const takeReserve =
+            takeInventory * tickToPrice(args.curTickIdx, "inventory");
 
         this.collateral = 0;
         this.worstTick.inventory -= dI;
 
         if (almostEq(this.worstTick.inventory, 0)) {
+            console.log(`[${this.name}] Recovered worst tick`);
             this.worstTick = undefined;
         } else {
             this.liquidity.getInventory().putRightNewRange(this.worstTick);
@@ -445,5 +416,5 @@ export class RecoveryBin {
         return this.collateral;
     }
 
-    constructor(private liquidity: Liquidity) {}
+    constructor(private name: string, private liquidity: Liquidity) {}
 }

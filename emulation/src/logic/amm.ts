@@ -2,7 +2,7 @@ import { CurrentTick } from "./cur-tick.ts";
 import { Liquidity, type WithdrawResult } from "./liquidity.ts";
 import type { TakeResult } from "./range.ts";
 import { TickIndex } from "./ticks.ts";
-import { almostEq, panic } from "./utils.ts";
+import { almostEq, panic, tickToPrice } from "./utils.ts";
 
 /**
  * Arguments for depositing liquidity into an AMM.
@@ -45,34 +45,13 @@ export type LiquidityDigest = {
     inventory: TakeResult[];
 };
 
-/**
- * Represents one side of the pool (either base or quote) and encapsulates reserve
- * management, concentrated inventory created by swaps, and IL recovery duties.
- *
- * ### Stable vs drifting behavior
- * Stable AMMs are expected to initialize their reserve range once and keep the
- * left bound at {@link MIN_TICK}. Drifting AMMs are coordinated externally so
- * their reserve window always spans from the current tick back to the opposite
- * side’s worst inventory tick. That policy guarantees that one of the sides
- * always has liquidity covering any price path while the other side gradually
- * sheds IL.
- *
- * ### Responsibilities
- * - Track the total deposited reserve so proportional withdrawals remain fair.
- * - Split deposits between the long-lived reserve range and the currently active
- *   tick, ensuring the live tick always has funds to serve swaps.
- * - Push swap-generated inventory into {@link Inventory} ranges and keep
- *   {@link CurrentTick} in sync.
- * - During withdrawals, convert the worst underwater ticks back into reserve so
- *   early exiters pay the highest IL cost.
- */
 export class AMM {
     private depositedReserve: number = 0;
     private liquidity: Liquidity;
     private currentTick: CurrentTick;
 
     public clone() {
-        const a = new AMM(this.currentTick.index.clone());
+        const a = new AMM(this.name, this.currentTick.index.clone());
 
         a.depositedReserve = this.depositedReserve;
         a.liquidity = this.liquidity.clone();
@@ -81,18 +60,6 @@ export class AMM {
         return a;
     }
 
-    /**
-     * Deposits liquidity into the AMM.
-     *
-     * - The very first deposit bootstraps the reserve range to span from
-     *   {@link TickIndex.min} up to the current tick (stable AMM behavior) or an
-     *   externally supplied drifting window.
-     * - Subsequent deposits split `args.reserve` across the long-lived reserve
-     *   range and the current tick so the live tick always gets one extra slice
-     *   of liquidity (`fullWidth = reserve.width + 1`).
-     * - Every deposit notifies the inventory book that a fresh reserve baseline
-     *   exists, so new swap inventory spawns new {@link InventoryRange}s.
-     */
     public deposit(args: DepositArgs): void {
         if (!this.liquidity.getReserve().isInitted()) {
             const curTick = this.currentTick.index;
@@ -123,19 +90,6 @@ export class AMM {
         this.depositedReserve += args.reserve;
     }
 
-    /**
-     * Withdraws a user's liquidity from the AMM.
-     *
-     * The `cut` reflects how much of the total deposited reserve the caller owns.
-     * That same ratio is removed from the long-lived reserve, the current tick,
-     * and the outstanding inventory.
-     *
-     * After draining the live tick, the method walks inventory **backwards**
-     * (from worst tick to best) converting it back into reserve-equivalent value.
-     * This design intentionally punishes early exiters (they crystallize the most
-     * IL) and caps the number of ticks a withdrawal needs to inspect, matching
-     * swap complexity.
-     */
     public withdraw(args: WithdrawArgs): WithdrawResult {
         const cut = args.depositedReserve / this.depositedReserve;
         let reserve = 0;
@@ -164,11 +118,13 @@ export class AMM {
                 if (!worstTick) panic("Worst tick should exist");
 
                 const worstTickRespectiveReserve =
-                    worstTick.inventory / worstTick.idx.price;
+                    worstTick.inventory *
+                    tickToPrice(worstTick.idx, "inventory");
 
                 if (worstTickRespectiveReserve >= respectiveReserve) {
                     const takeInventory =
-                        respectiveReserve * worstTick.idx.price;
+                        respectiveReserve *
+                        tickToPrice(worstTick.idx, "reserve");
                     worstTick.inventory -= takeInventory;
 
                     if (!almostEq(worstTick.inventory, 0)) {
@@ -201,30 +157,18 @@ export class AMM {
         return { reserve, inventory };
     }
 
-    /**
-     * Rebases the AMM's reserve range to a new left bound based on the target.
-     * Drifts logarithmically: newLeft = currentLeft + (targetLeft - currentLeft) / 2.
-     * @param targetLeft The target left bound (e.g. opposite worst inventory tick).
-     */
     public drift(targetLeft: TickIndex) {
         if (!this.liquidity.getReserve().isInitted()) return;
+
+        console.log(`[${this.name}] Drifting to ${targetLeft.toAbsolute()}`);
 
         this.liquidity.driftReserve(targetLeft);
     }
 
-    /**
-     * Exposes the mutable {@link CurrentTick}. External orchestrators use this to
-     * coordinate swaps and, for drifting AMMs, to enforce the moving window
-     * policy.
-     */
     public get curTick(): CurrentTick {
         return this.currentTick;
     }
 
-    /**
-     * Gets the worst (lowest price) inventory tick from the AMM.
-     * @returns The worst inventory tick, or `undefined` if the inventory is empty.
-     */
     public getRightInventoryTick() {
         return this.liquidity.getInventory().peekRight();
     }
@@ -256,18 +200,14 @@ export class AMM {
         };
     }
 
-    /**
-     * Calculates the impermanent loss (IL) of the AMM.
-     * IL is the difference between the value of the assets held in the AMM and the value of the assets if they were held in a wallet.
-     * @returns The impermanent loss as a percentage (0 to 1).
-     */
     public get il(): number {
         if (almostEq(this.liquidity.getInventory().qty, 0)) {
             return 0;
         }
 
         const actualReserve =
-            this.liquidity.getInventory().qty / this.curTick.index.price;
+            this.liquidity.getInventory().qty *
+            tickToPrice(this.curTick.index, "inventory");
 
         const respectiveReserve =
             this.liquidity.getInventory().respectiveReserve;
@@ -277,20 +217,16 @@ export class AMM {
         return Math.abs(1 - actualReserve / respectiveReserve);
     }
 
-    /**
-     * Gets the total amount of reserve deposited in the AMM.
-     * @returns The total deposited reserve.
-     */
     public getDepositedReserve(): number {
         return this.depositedReserve;
     }
 
-    /**
-     * Creates a new AMM bound to a starting tick index. The tick orientation is
-     * already encoded inside {@link TickIndex} so the same code path works for
-     * base and quote sides.
-     */
+    public toString() {
+        return this.name;
+    }
+
     constructor(
+        private name: string,
         curTickIdx: TickIndex,
         args?: {
             reserveQty: number;
@@ -299,7 +235,11 @@ export class AMM {
         }
     ) {
         this.liquidity = new Liquidity();
-        this.currentTick = new CurrentTick(curTickIdx.clone(), this.liquidity);
+        this.currentTick = new CurrentTick(
+            this.name,
+            curTickIdx.clone(),
+            this.liquidity
+        );
 
         if (args) {
             const fullWidth = args.tickSpan + 1;

@@ -2,10 +2,10 @@ import { AMM } from "./amm.ts";
 import { type AMMSwapDirection } from "./cur-tick.ts";
 import { TickIndex } from "./ticks.ts";
 import {
+    absoluteTickToPrice,
     almostEq,
     panic,
     TEN_PERCENT_TICKS,
-    tickToPrice,
     type TwoSided,
 } from "./utils.ts";
 import { OrderedMap } from "@js-sdsl/ordered-map";
@@ -25,18 +25,6 @@ export type SwapResult = {
     qtyOut: number;
 };
 
-/**
- * Top-level orchestrator that exposes a dual-AMM pool (stable + drifting per
- * side). The stable AMM covers the whole price curve, while the drifting AMM is
- * expected to follow the rules described earlier (left bound equals opposite
- * worst inventory tick, right bound equals current tick - 1).
- *
- * Responsibilities:
- * - Route deposits/withdrawals proportionally between stable and drifting AMMs.
- * - Apply dynamic fees that scale with aggregated IL.
- * - Route swaps across four AMMs in a deterministic order, keeping tick indices
- *   synchronized for both base and quote sides.
- */
 export class Pool {
     private stableAMM: TwoSided<AMM>;
     private driftingAMM: TwoSided<AMM>;
@@ -53,38 +41,25 @@ export class Pool {
         return p;
     }
 
-    /**
-     * Rebases the drifting AMMs to match the opposite side's inventory.
-     * This should be called periodically by an external keeper.
-     */
     private drift() {
         const baseWorst = this.driftingAMM.base.getRightInventoryTick();
 
-        // For quote drifting AMM, left bound is opposite (base) worst inventory tick
-        // Base is Negated, Quote is Positive. So we must Negate Base index to get Quote Target.
         if (baseWorst !== undefined) {
             this.driftingAMM.quote.drift(baseWorst.idx.clone(true));
         }
 
         const quoteWorst = this.driftingAMM.quote.getRightInventoryTick();
 
-        // For base drifting AMM, left bound is opposite (quote) worst inventory tick
-        // Quote is Positive, Base is Negated. So we must Negate Quote index to get Base Target.
         if (quoteWorst !== undefined) {
             this.driftingAMM.base.drift(quoteWorst.idx.clone(true));
         }
     }
 
-    /**
-     * Executes a swap, takes fees upfront, and feeds the RecoveryBins of the
-     * AMMs that are about to receive inventory (quote AMMs when buying quote,
-     * base AMMs when buying base).
-     */
     public swap(args: SwapArgs): SwapResult {
         const fees = args.qtyIn * this.getFees();
         const qtyIn = args.qtyIn - fees;
 
-        /*     console.log(
+        /* console.log(
             `Incoming ${args.direction} swap, qty = ${qtyIn} ${
                 args.direction === "base -> quote" ? "base" : "quote"
             }, fees = ${fees}, curtick: ${this.driftingAMM.base.curTick.index.toAbsolute()}`
@@ -107,7 +82,7 @@ export class Pool {
             qtyOut = this._swap(qtyIn, args.direction);
         }
 
-        /*   console.log(
+        /* console.log(
             `Received ${qtyOut} ${
                 args.direction === "base -> quote" ? "quote" : "base"
             }, curtick: ${this.driftingAMM.base.curTick.index.toAbsolute()}`
@@ -118,12 +93,6 @@ export class Pool {
         return { qtyOut };
     }
 
-    /**
-     * Deposits liquidity into one side of the pool.
-     * The liquidity is split between the stable and drifting AMMs according to `STABLE_AMM_CUT`.
-     * @param side The side of the pool to deposit into (`base` or `quote`).
-     * @param qty The amount of liquidity to deposit.
-     */
     public deposit(side: keyof TwoSided<AMM>, qty: number) {
         const stableCut = qty * STABLE_AMM_CUT;
         const driftingCut = qty - stableCut;
@@ -145,12 +114,6 @@ export class Pool {
         this.driftingAMM[side].deposit({ reserve: driftingCut, leftBound });
     }
 
-    /**
-     * Withdraws liquidity from one side of the pool.
-     * The withdrawal amount is split between the stable and drifting AMMs.
-     * @param side The side of the pool to withdraw from (`base` or `quote`).
-     * @param qty The amount of liquidity to withdraw.
-     */
     public withdraw(side: keyof TwoSided<AMM>, qty: number) {
         const stableCut = qty * STABLE_AMM_CUT;
         const driftingCut = qty - stableCut;
@@ -159,38 +122,17 @@ export class Pool {
         this.driftingAMM[side].withdraw({ depositedReserve: driftingCut });
     }
 
-    /**
-     * Internal swap scheduler shared by both directions.
-     *
-     * - Iterates over all four AMMs in a fixed order, letting each try to fill
-     *   as much of `qtyIn` as it can on the current tick.
-     * - If none of them make progress (`hasAny === false`), the function moves
-     *   ticks forward/backward in lockstep (base increments while quote
-     *   decrements for base->quote swaps, and vice versa) until new liquidity is
-     *   available.
-     * - After any tick move it re-validates that all AMMs point at the same
-     *   absolute index to guarantee price coherence.
-     */
     private _swap(qtyIn: number, direction: SwapDirection): number {
         let qtyOut = 0;
 
-        // For "base -> quote" swap: user gives base, receives quote
-        // - Base AMM receives Base (Reserve) → "reserve -> inventory"
-        // - Quote AMM receives Base (Inventory) → "inventory -> reserve"
         let baseDirection: AMMSwapDirection;
         let quoteDirection: AMMSwapDirection;
 
         if (direction === "base -> quote") {
-            // User sells Base (Reserve) -> AMM buys Base (Reserve)
-            // Base AMM: Reserve -> Inventory (Receives Reserve, Pays Inventory)
             baseDirection = "reserve -> inventory";
-            // Quote AMM: Inventory -> Reserve (Receives Inventory, Pays Reserve)
             quoteDirection = "inventory -> reserve";
         } else {
-            // User sells Quote (Reserve) -> AMM buys Quote (Reserve)
-            // Base AMM: Inventory -> Reserve (Receives Inventory, Pays Reserve)
             baseDirection = "inventory -> reserve";
-            // Quote AMM: Reserve -> Inventory (Receives Reserve, Pays Reserve)
             quoteDirection = "reserve -> inventory";
         }
 
@@ -206,26 +148,33 @@ export class Pool {
 
             // Keep swapping with each AMM until it's fully exhausted
             for (const [amm, direction] of amms) {
-                while (!almostEq(qtyIn, 0)) {
-                    const {
-                        qtyOut: q,
-                        reminderIn,
-                        recoveredReserve,
-                    } = amm.curTick.swap({
-                        direction,
-                        qtyIn,
-                    });
+                const {
+                    qtyOut: q,
+                    reminderIn,
+                    recoveredReserve,
+                } = amm.curTick.swap({
+                    direction,
+                    qtyIn,
+                });
 
+                /* if (q > 0) {
+                    console.log(
+                        `[${amm.toString()}]`,
+                        `Swap tick (${amm.curTick.index.toAbsolute()}):`,
+                        `qtyIn: ${
+                            qtyIn - reminderIn
+                        }, qtyOut: ${q}, recoveredReserve: ${recoveredReserve}`
+                    );
+                } */
+
+                if (recoveredReserve > 0) {
                     amm.deposit({ reserve: recoveredReserve });
+                }
 
-                    if (reminderIn < qtyIn) {
-                        hasAny = true;
-                        qtyIn = reminderIn;
-                        qtyOut += q;
-                    } else {
-                        // This AMM can't provide anything, move to next
-                        break;
-                    }
+                if (reminderIn < qtyIn) {
+                    hasAny = true;
+                    qtyIn = reminderIn;
+                    qtyOut += q;
                 }
 
                 if (almostEq(qtyIn, 0)) return qtyOut;
@@ -265,12 +214,7 @@ export class Pool {
 
         return qtyOut;
     }
-
-    /**
-     * Calculates the average impermanent loss (IL) across all AMMs in the pool.
-     * @returns The average IL as a percentage (0 to 1).
-     */
-    public getAvgIl(): number {
+    public getAvgImpermanentLoss(): number {
         const totalReserve0 =
             this.stableAMM.base.getDepositedReserve() +
             this.driftingAMM.base.getDepositedReserve();
@@ -306,13 +250,8 @@ export class Pool {
         return (il0 + il1) / 2;
     }
 
-    /**
-     * Calculates the dynamic fees for a swap based on the average impermanent loss.
-     * The higher the IL, the higher the fees.
-     * @returns The fee rate as a percentage (0 to 1).
-     */
     public getFees(): number {
-        const il = this.getAvgIl();
+        const il = this.getAvgImpermanentLoss();
         return this.calculateFees(il);
     }
 
@@ -365,7 +304,7 @@ export class Pool {
             const qty = prev + tick.qty;
             quoteTicks.setElement(idx, qty);
 
-            const repsectiveBaseQty = qty / tickToPrice(idx);
+            const repsectiveBaseQty = qty * absoluteTickToPrice(idx, "quote");
             maxBaseTickQty = Math.max(maxBaseTickQty, repsectiveBaseQty);
         }
 
@@ -434,38 +373,33 @@ export class Pool {
         const quoteTickIdx = baseTickIdx.clone(true);
 
         if (args) {
-            const baseHalf = args.baseQty / 2;
-            const sbr = baseHalf * STABLE_AMM_CUT;
-            const dbr = baseHalf - sbr;
-            const sqi = sbr;
-            const dqi = dbr;
-
-            const quoteHalf = args.quoteQty / 2;
-            const sqr = quoteHalf * STABLE_AMM_CUT;
-            const dqr = quoteHalf - sqr;
-            const sbi = sqr;
-            const dbi = dqr;
+            const stableBaseShare = args.baseQty * STABLE_AMM_CUT;
+            const stableQuoteShare = args.quoteQty * STABLE_AMM_CUT;
 
             this.stableAMM = {
-                base: new AMM(baseTickIdx.clone(), {
-                    reserveQty: sbr,
-                    inventoryQty: sbi,
-                    tickSpan: args.tickSpan,
-                }),
-                quote: new AMM(quoteTickIdx.clone(), {
-                    reserveQty: sqr,
-                    inventoryQty: sqi,
-                    tickSpan: args.tickSpan,
-                }),
+                base: new AMM("StableBase", baseTickIdx.clone()),
+                quote: new AMM("StableQuote", quoteTickIdx.clone()),
             };
 
+            this.stableAMM.base.deposit({ reserve: stableBaseShare });
+            this.stableAMM.quote.deposit({ reserve: stableQuoteShare });
+
+            const driftingBaseShare = args.baseQty - stableBaseShare;
+            const driftingQuoteShare = args.quoteQty - stableQuoteShare;
+
+            const dbr = driftingBaseShare / 2;
+            const dqi = driftingBaseShare - dbr;
+
+            const dqr = driftingQuoteShare / 2;
+            const dbi = driftingQuoteShare - dqr;
+
             this.driftingAMM = {
-                base: new AMM(baseTickIdx.clone(), {
+                base: new AMM("DriftingBase", baseTickIdx.clone(), {
                     reserveQty: dbr,
                     inventoryQty: dbi,
                     tickSpan: args.tickSpan,
                 }),
-                quote: new AMM(quoteTickIdx.clone(), {
+                quote: new AMM("DriftingQuote", quoteTickIdx.clone(), {
                     reserveQty: dqr,
                     inventoryQty: dqi,
                     tickSpan: args.tickSpan,
@@ -473,12 +407,12 @@ export class Pool {
             };
         } else {
             this.stableAMM = {
-                base: new AMM(baseTickIdx.clone()),
-                quote: new AMM(quoteTickIdx.clone()),
+                base: new AMM("StableBase", baseTickIdx.clone()),
+                quote: new AMM("StableQuote", quoteTickIdx.clone()),
             };
             this.driftingAMM = {
-                base: new AMM(baseTickIdx.clone()),
-                quote: new AMM(quoteTickIdx.clone()),
+                base: new AMM("DriftingBase", baseTickIdx.clone()),
+                quote: new AMM("DriftingQuote", quoteTickIdx.clone()),
             };
         }
     }
