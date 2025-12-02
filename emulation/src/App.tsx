@@ -70,9 +70,7 @@ const newTargetTick = (oldTick: number) => {
 };
 
 function App() {
-    const [liquidity, setLiquidity] = createSignal(
-        pool.getLiquidityDigest(VISIBLE_TICKS)
-    );
+    const [liquidity, setLiquidity] = createSignal(pool.getLiquidityDigest());
     const [stats, setStats] = createSignal(pool.getStats());
     const [targetTick, setTargetTick] = createSignal(START_TICK);
     const [int, setInt] = createSignal<number | undefined>(undefined);
@@ -101,9 +99,7 @@ function App() {
             console.error("Bad swap, resetting...", e);
         }
 
-        const liquidity = pool.getLiquidityDigest(VISIBLE_TICKS);
-
-        setLiquidity(liquidity);
+        setLiquidity(pool.getLiquidityDigest());
         setStats(pool.getStats());
         setTargetTick(newTargetTick);
     };

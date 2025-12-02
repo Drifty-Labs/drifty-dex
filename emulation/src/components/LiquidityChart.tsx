@@ -220,61 +220,36 @@ function flattenRanges(
                 const r = liquidity.base.reserve;
                 if (!r) return undefined;
 
-                const leftTick = r.peekBest().tickIdx.toAbsolute();
-                const rightTick = r.peekWorst().tickIdx.toAbsolute();
+                const height = r.qty / r.width;
 
-                const width = rightTick - leftTick + 1;
-                const qty = r.getQty();
-                const height = qty / width;
-
-                return { left: leftTick, right: rightTick, height };
+                return { left: r.left, right: r.right, height };
             })(),
-            oppositeInventory: liquidity.quote.inventory
-                .map((it) => {
-                    const leftTick = it.peekBest().tickIdx.toAbsolute();
-                    const rightTick = it.peekWorst().tickIdx.toAbsolute();
+            oppositeInventory: liquidity.quote.inventory.map((it) => {
+                const height = it.qty / it.width;
 
-                    const width = rightTick - leftTick + 1;
-                    const qty = it.getQty();
-                    const height = qty / width;
-
-                    return { left: leftTick, right: rightTick, height };
-                })
-                .toSorted((a, b) => {
-                    return a.left - b.left;
-                }),
+                return { left: it.left, right: it.right, height };
+            }),
         },
         quote: {
             reserve: (() => {
                 const r = liquidity.quote.reserve;
                 if (!r) return undefined;
 
-                const leftTick = r.peekWorst().tickIdx.toAbsolute();
-                const rightTick = r.peekBest().tickIdx.toAbsolute();
+                const avgTick = (r.left + r.right) / 2;
+                const qty =
+                    r.qty * absoluteTickToPrice(avgTick, "quote", "reserve");
+                const height = qty / r.width;
 
-                const width = rightTick - leftTick + 1;
-                const avgTick = (leftTick + rightTick) / 2;
-                const qty = r.getQty() * absoluteTickToPrice(avgTick, "quote");
-                const height = qty / width;
-
-                return { left: leftTick, right: rightTick, height };
+                return { left: r.left, right: r.right, height };
             })(),
-            oppositeInventory: liquidity.base.inventory
-                .map((it) => {
-                    const leftTick = it.peekWorst().tickIdx.toAbsolute();
-                    const rightTick = it.peekBest().tickIdx.toAbsolute();
+            oppositeInventory: liquidity.base.inventory.map((it) => {
+                const avgTick = (it.left + it.right) / 2;
+                const qty =
+                    it.qty * absoluteTickToPrice(avgTick, "quote", "reserve");
+                const height = qty / it.width;
 
-                    const width = rightTick - leftTick + 1;
-                    const avgTick = (leftTick + rightTick) / 2;
-                    const qty =
-                        it.getQty() * absoluteTickToPrice(avgTick, "quote");
-                    const height = qty / width;
-
-                    return { left: leftTick, right: rightTick, height };
-                })
-                .toSorted((a, b) => {
-                    return a.left - b.left;
-                }),
+                return { left: it.left, right: it.right, height };
+            }),
         },
     };
 

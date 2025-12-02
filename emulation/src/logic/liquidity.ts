@@ -1,6 +1,11 @@
-import { InventoryRange, ReserveRange, type TakeResult } from "./range.ts";
-import { TickIndex } from "./ticks.ts";
-import { almostEq, panic, tickToPrice } from "./utils.ts";
+import { InventoryRange, ReserveRange } from "./range.ts";
+import {
+    absoluteTickToPrice,
+    MAX_TICK,
+    MIN_TICK,
+    panic,
+    type Side,
+} from "./utils.ts";
 
 /**
  * The result of a withdrawal operation.
@@ -19,23 +24,25 @@ export type ReserveTick = {
     /** The amount of reserve liquidity. */
     reserve: number;
     /** The index of the tick. */
-    idx: TickIndex;
+    idx: number;
 };
 
 export class Reserve {
     private range: ReserveRange | undefined = undefined;
 
+    constructor(private _side: Side) {}
+
     public clone() {
-        const r = new Reserve();
+        const r = new Reserve(this.side);
         r.range = this.range?.clone();
 
         return r;
     }
 
-    public init(qty: number, left: TickIndex, right: TickIndex) {
+    public init(qty: number, left: number, right: number) {
         this.assertNotInitted();
 
-        this.range = new ReserveRange(qty, left, right);
+        this.range = new ReserveRange(qty, left, right, this.side);
     }
 
     public withdrawCut(cut: number): number {
@@ -56,13 +63,13 @@ export class Reserve {
         this.range!.put(qty);
     }
 
-    public putRight(qty: number) {
+    public putBest(qty: number) {
         this.assertInitted();
 
         this.range!.putBest(qty);
     }
 
-    public takeRight(): ReserveTick | undefined {
+    public takeBest(): ReserveTick | undefined {
         if (!this.isInitted()) return undefined;
 
         const result = this.range!.takeBest();
@@ -77,7 +84,7 @@ export class Reserve {
         };
     }
 
-    public peekRight(): ReserveTick | undefined {
+    public peekBest(): ReserveTick | undefined {
         if (!this.isInitted()) return undefined;
 
         const result = this.range!.peekBest();
@@ -88,12 +95,12 @@ export class Reserve {
         };
     }
 
-    public driftLeft(newLeft: TickIndex) {
+    public driftWorst(newWorst: number) {
         this.assertInitted();
-        this.range!.setLeft(newLeft);
+        this.range!.setWorst(newWorst);
     }
 
-    public peekLeft(): ReserveTick | undefined {
+    public peekWorst(): ReserveTick | undefined {
         if (!this.isInitted()) return undefined;
 
         const result = this.range!.peekWorst();
@@ -117,7 +124,11 @@ export class Reserve {
     }
 
     public get qty(): number {
-        return this.range?.getQty() ?? 0;
+        return this.range?.qty ?? 0;
+    }
+
+    public get side() {
+        return this._side;
     }
 
     public isInitted() {
@@ -141,7 +152,7 @@ export type InventoryTick = {
     /** The amount of inventory liquidity. */
     inventory: number;
     /** The index of the tick. */
-    idx: TickIndex;
+    idx: number;
 };
 
 export class Inventory {
@@ -150,8 +161,10 @@ export class Inventory {
     private shouldSpawnNew: boolean = true;
     private ranges: InventoryRange[] = [];
 
+    constructor(private _side: Side) {}
+
     public clone() {
-        const i = new Inventory();
+        const i = new Inventory(this._side);
 
         i._respectiveReserve = this._respectiveReserve;
         i.allocatedQty = this.allocatedQty;
@@ -161,10 +174,10 @@ export class Inventory {
         return i;
     }
 
-    public init(qty: number, left: TickIndex, right: TickIndex) {
+    public init(qty: number, left: number, right: number) {
         if (this.ranges.length > 0) panic("Can only init inventory once");
 
-        const range = new InventoryRange(qty, left, right);
+        const range = new InventoryRange(qty, left, right, this.side);
         this.ranges.push(range);
         this.allocatedQty = qty;
         this._respectiveReserve = range.calcRespectiveReserve();
@@ -172,14 +185,18 @@ export class Inventory {
         return this._respectiveReserve;
     }
 
-    public takeRight(): InventoryTick | undefined {
+    public takeWorst(): InventoryTick | undefined {
         if (this.isEmpty()) return undefined;
 
-        const range = this.ranges[this.ranges.length - 1];
+        const range = this.isBase()
+            ? this.ranges[0]
+            : this.ranges[this.ranges.length - 1];
+
         const result = range.takeWorst();
 
         if (range.isEmpty()) {
-            this.ranges.pop();
+            if (this.isBase()) this.ranges.shift();
+            else this.ranges.pop();
         }
 
         if (this.ranges.length === 0) {
@@ -187,7 +204,8 @@ export class Inventory {
             this.allocatedQty = 0;
         } else {
             this._respectiveReserve -=
-                result.qty * tickToPrice(result.tickIdx, "inventory");
+                result.qty *
+                absoluteTickToPrice(result.tickIdx, this.side, "inventory");
             this.allocatedQty -= result.qty;
         }
 
@@ -197,10 +215,12 @@ export class Inventory {
         };
     }
 
-    public peekRight(): InventoryTick | undefined {
+    public peekWorst(): InventoryTick | undefined {
         if (this.isEmpty()) return undefined;
 
-        const range = this.ranges[this.ranges.length - 1];
+        const range = this.isBase()
+            ? this.ranges[0]
+            : this.ranges[this.ranges.length - 1];
         const result = range.peekWorst();
 
         return {
@@ -209,49 +229,48 @@ export class Inventory {
         };
     }
 
-    public putRightNewRange(tick: InventoryTick) {
-        // Invariant: New worst must be strictly greater (further right) than current worst
-        if (!this.isEmpty()) {
-            const currentWorst = this.peekRight();
-            if (currentWorst && !tick.idx.gt(currentWorst.idx)) {
-                panic(
-                    `Inventory invariant violated: New worst tick ${tick.idx.index()} must be greater than current worst ${currentWorst.idx.index()}`
-                );
-            }
-        }
-
+    public putWorstNewRange(tick: InventoryTick) {
         const respectiveValue =
-            tick.inventory * tickToPrice(tick.idx, "inventory");
+            tick.inventory *
+            absoluteTickToPrice(tick.idx, this._side, "inventory");
+
         this._respectiveReserve += respectiveValue;
         this.allocatedQty += tick.inventory;
 
         const range = new InventoryRange(
             tick.inventory,
             tick.idx,
-            tick.idx.clone()
+            tick.idx,
+            this.side
         );
-        this.ranges.push(range);
+
+        if (this.isBase()) {
+            this.ranges.unshift(range);
+        } else {
+            this.ranges.push(range);
+        }
 
         return;
     }
 
-    public takeLeft(curTickIdx: TickIndex): InventoryTick | undefined {
+    public takeBest(curTickIdx: number): InventoryTick | undefined {
         if (this.isEmpty()) return undefined;
 
-        const range = this.ranges[0];
+        const range = this.isBase()
+            ? this.ranges[this.ranges.length - 1]
+            : this.ranges[0];
 
         // IL ranges can have voids in between
         // check if the best is the same as the provided one, otherwise return undefined
-        const bestTickIdx = range.bestTickIdx();
-
-        if (!bestTickIdx.eq(curTickIdx)) {
+        if (range.peekBest().tickIdx !== curTickIdx) {
             return undefined;
         }
 
         const result = range.takeBest();
 
         if (range.isEmpty()) {
-            this.ranges.shift();
+            if (this.isBase()) this.ranges.pop();
+            else this.ranges.shift();
         }
 
         if (this.ranges.length === 0) {
@@ -259,7 +278,8 @@ export class Inventory {
             this.allocatedQty = 0;
         } else {
             this._respectiveReserve -=
-                result.qty * tickToPrice(result.tickIdx, "inventory");
+                result.qty *
+                absoluteTickToPrice(result.tickIdx, this.side, "inventory");
             this.allocatedQty -= result.qty;
         }
 
@@ -269,10 +289,12 @@ export class Inventory {
         };
     }
 
-    public peekLeft(): InventoryTick | undefined {
+    public peekBest(): InventoryTick | undefined {
         if (this.isEmpty()) return undefined;
 
-        const range = this.ranges[0];
+        const range = this.isBase()
+            ? this.ranges[this.ranges.length - 1]
+            : this.ranges[0];
         const result = range.peekBest();
 
         return {
@@ -281,20 +303,10 @@ export class Inventory {
         };
     }
 
-    public putLeft(tick: InventoryTick) {
-        if (!this.isEmpty()) {
-            const bestRange = this.ranges[0];
-            const currentBestIdx = bestRange.bestTickIdx();
-
-            if (!tick.idx.lt(currentBestIdx)) {
-                panic(
-                    `Inventory invariant violated: New best tick ${tick.idx.index()} must be less than current best ${currentBestIdx.index()}`
-                );
-            }
-        }
-
+    public putBest(tick: InventoryTick) {
         const respectiveValue =
-            tick.inventory * tickToPrice(tick.idx, "inventory");
+            tick.inventory *
+            absoluteTickToPrice(tick.idx, this._side, "inventory");
         this._respectiveReserve += respectiveValue;
         this.allocatedQty += tick.inventory;
 
@@ -302,18 +314,26 @@ export class Inventory {
             const range = new InventoryRange(
                 tick.inventory,
                 tick.idx,
-                tick.idx.clone()
+                tick.idx,
+                this.side
             );
 
             this.shouldSpawnNew = false;
-            this.ranges.unshift(range);
+
+            if (this.isBase()) {
+                this.ranges.push(range);
+            } else {
+                this.ranges.unshift(range);
+            }
 
             return;
         }
 
         this.assertNotEmpty();
 
-        const range = this.ranges[0];
+        const range = this.isBase()
+            ? this.ranges[this.ranges.length - 1]
+            : this.ranges[0];
         range.putBest(tick.inventory, tick.idx);
     }
 
@@ -329,8 +349,16 @@ export class Inventory {
         return this.allocatedQty;
     }
 
+    public get side() {
+        return this._side;
+    }
+
     public isEmpty() {
         return this.ranges.length === 0;
+    }
+
+    public isBase() {
+        return this._side === "base";
     }
 
     public getRanges() {
@@ -343,14 +371,19 @@ export class Inventory {
 }
 
 export class Liquidity {
-    private reserve: Reserve = new Reserve();
-    private inventory: Inventory = new Inventory();
+    private _reserve: Reserve;
+    private _inventory: Inventory;
+
+    constructor(private _side: Side) {
+        this._reserve = new Reserve(_side);
+        this._inventory = new Inventory(_side);
+    }
 
     public clone() {
-        const l = new Liquidity();
+        const l = new Liquidity(this._side);
 
-        l.reserve = this.reserve.clone();
-        l.inventory = this.inventory.clone();
+        l._reserve = this._reserve.clone();
+        l._inventory = this._inventory.clone();
 
         return l;
     }
@@ -358,69 +391,96 @@ export class Liquidity {
     public init(
         reserveQty: number,
         inventoryQty: number,
-        curTickIdx: TickIndex,
+        curTickIdx: number,
         tickSpan?: number
     ) {
-        const reserveRight = curTickIdx.clone().dec();
-        const reserveLeft = tickSpan
-            ? reserveRight.clone().sub(tickSpan)
-            : curTickIdx.min();
+        const reserveRight = this.isBase()
+            ? tickSpan
+                ? curTickIdx + tickSpan + 1
+                : MAX_TICK
+            : curTickIdx - 1;
 
-        const inventoryLeft = curTickIdx.clone().inc();
-        const inventoryRight = tickSpan
-            ? inventoryLeft.clone().add(tickSpan)
-            : curTickIdx.max();
+        const reserveLeft = this.isBase()
+            ? curTickIdx + 1
+            : tickSpan
+            ? curTickIdx - 1 - tickSpan
+            : MIN_TICK;
 
-        this.reserve.init(reserveQty, reserveLeft, reserveRight);
-        return this.inventory.init(inventoryQty, inventoryLeft, inventoryRight);
+        const inventoryLeft = this.isBase()
+            ? tickSpan
+                ? curTickIdx - 1 - tickSpan
+                : MIN_TICK
+            : curTickIdx + 1;
+
+        const inventoryRight = this.isBase()
+            ? curTickIdx - 1
+            : tickSpan
+            ? curTickIdx + tickSpan + 1
+            : MAX_TICK;
+
+        this._reserve.init(reserveQty, reserveLeft, reserveRight);
+
+        return this._inventory.init(
+            inventoryQty,
+            inventoryLeft,
+            inventoryRight
+        );
     }
 
-    public driftReserve(targetLeft: TickIndex) {
-        this.reserve.driftLeft(targetLeft);
+    public driftReserve(targetWorst: number) {
+        this._reserve.driftWorst(targetWorst);
     }
 
     public obtainInventoryTick(
         reserveTick: ReserveTick | undefined,
-        curTickIdx: TickIndex
+        curTickIdx: number
     ): InventoryTick | undefined {
         if (reserveTick) {
-            if (!this.reserve.isInitted()) {
-                this.reserve.init(
+            if (!this._reserve.isInitted()) {
+                this._reserve.init(
                     reserveTick.reserve,
-                    reserveTick.idx.clone(),
-                    reserveTick.idx.clone()
+                    reserveTick.idx,
+                    reserveTick.idx
                 );
-                this.inventory.notifyReserveChanged();
+                this._inventory.notifyReserveChanged();
             } else {
-                this.reserve.putRight(reserveTick.reserve);
-                this.inventory.notifyReserveChanged();
+                this._reserve.putBest(reserveTick.reserve);
+                this._inventory.notifyReserveChanged();
             }
         } else {
-            if (this.reserve.isInitted()) {
-                this.reserve.putRight(0);
-                this.inventory.notifyReserveChanged();
+            if (this._reserve.isInitted()) {
+                this._reserve.putBest(0);
+                this._inventory.notifyReserveChanged();
             }
         }
 
-        return this.inventory.takeLeft(curTickIdx);
+        return this._inventory.takeBest(curTickIdx);
     }
 
     public obtainReserveTick(
         inventoryTick: InventoryTick | undefined
     ): ReserveTick | undefined {
-        if (inventoryTick) this.inventory.putLeft(inventoryTick);
+        if (inventoryTick) this._inventory.putBest(inventoryTick);
 
-        if (!this.reserve.isInitted()) return undefined;
-        const tick = this.reserve.takeRight();
+        if (!this._reserve.isInitted()) return undefined;
+        const tick = this._reserve.takeBest();
 
         return tick;
     }
 
-    public getReserve() {
-        return this.reserve;
+    public get reserve() {
+        return this._reserve;
     }
 
-    public getInventory() {
-        return this.inventory;
+    public get inventory() {
+        return this._inventory;
+    }
+
+    public isBase() {
+        return this._side === "base";
+    }
+
+    public get side() {
+        return this._side;
     }
 }

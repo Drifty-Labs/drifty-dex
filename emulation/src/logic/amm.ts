@@ -1,8 +1,14 @@
 import { CurrentTick } from "./cur-tick.ts";
 import { Liquidity, type WithdrawResult } from "./liquidity.ts";
 import type { InventoryRange, ReserveRange, TakeResult } from "./range.ts";
-import { TickIndex } from "./ticks.ts";
-import { almostEq, panic, tickToPrice } from "./utils.ts";
+import {
+    absoluteTickToPrice,
+    almostEq,
+    MAX_TICK,
+    MIN_TICK,
+    panic,
+    type Side,
+} from "./utils.ts";
 
 /**
  * Arguments for depositing liquidity into an AMM.
@@ -10,11 +16,7 @@ import { almostEq, panic, tickToPrice } from "./utils.ts";
 export type DepositArgs = {
     /** The amount of reserve to deposit. */
     reserve: number;
-    /**
-     * Optional left bound for the reserve range.
-     * If provided, it overrides the default behavior (min tick).
-     */
-    leftBound?: TickIndex;
+    tickSpan?: number;
 };
 
 /**
@@ -33,7 +35,7 @@ export type WithdrawArgs = {
  */
 export type LiquidityDigest = {
     curTick: {
-        idx: TickIndex;
+        idx: number;
         reserve: number;
         inventory: number;
     };
@@ -51,24 +53,24 @@ export class AMM {
     private currentTick: CurrentTick;
 
     constructor(
-        private name: string,
-        curTickIdx: TickIndex,
+        private side: Side,
+        curTickIdx: number,
         args?: {
             reserveQty: number;
             inventoryQty: number;
-            tickSpan: number;
+            tickSpan: number; // (tickSpan + 1) === width
         },
         liquidity?: Liquidity,
         currentTick?: CurrentTick
     ) {
-        this.liquidity = liquidity ? liquidity : new Liquidity();
+        this.liquidity = liquidity ? liquidity : new Liquidity(this.side);
         this.currentTick = currentTick
             ? currentTick
-            : new CurrentTick(this.name, curTickIdx.clone(), this.liquidity);
+            : new CurrentTick(this.side, curTickIdx, this.liquidity);
 
         if (args) {
-            const fullWidth = args.tickSpan + 1;
-            const addToReserve = (args.reserveQty * args.tickSpan) / fullWidth;
+            const addToReserve =
+                (args.reserveQty * (args.tickSpan + 1)) / (args.tickSpan + 2);
             const addToCurTick = args.reserveQty - addToReserve;
 
             const respectiveReserve = this.liquidity.init(
@@ -87,7 +89,7 @@ export class AMM {
         const liq = this.liquidity.clone();
         const ct = this.currentTick.clone(liq);
 
-        const a = new AMM(this.name, ct.index.clone(), undefined, liq, ct);
+        const a = new AMM(this.side, ct.index, undefined, liq, ct);
 
         a.depositedReserve = this.depositedReserve;
 
@@ -95,35 +97,37 @@ export class AMM {
     }
 
     public deposit(args: DepositArgs): void {
-        if (!this.liquidity.getReserve().isInitted()) {
-            const curTick = this.currentTick.index.clone();
-            const leftBound =
-                args.leftBound === undefined ? curTick.min() : args.leftBound;
+        if (!this.liquidity.reserve.isInitted()) {
+            const curTick = this.currentTick.index;
 
-            const rightBound = curTick.clone();
-            rightBound.dec();
+            const tickSpan =
+                args.tickSpan ?? this.isBase()
+                    ? MAX_TICK - (curTick + 1)
+                    : curTick - 1 - MIN_TICK;
 
-            const fullWidth = leftBound.distance(rightBound) + 2;
-
-            const addToReserve = (args.reserve * (fullWidth - 1)) / fullWidth;
+            const addToReserve =
+                (args.reserve * (tickSpan + 1)) / (tickSpan + 2);
             const addToCurTick = args.reserve - addToReserve;
 
-            console.log("Deposit in", leftBound, rightBound);
+            const leftBound = this.isBase()
+                ? curTick + 1
+                : curTick - 1 - tickSpan;
+            const rightBound = this.isBase()
+                ? curTick + 1 + tickSpan
+                : curTick - 1;
 
-            this.liquidity
-                .getReserve()
-                .init(addToReserve, leftBound, rightBound);
+            this.liquidity.reserve.init(addToReserve, leftBound, rightBound);
             this.curTick.deposit(addToCurTick);
         } else {
-            const fullWidth = this.liquidity.getReserve().width + 1;
+            const fullWidth = this.liquidity.reserve.width + 1;
             const addToReserve = (args.reserve * (fullWidth - 1)) / fullWidth;
             const addToCurTick = args.reserve - addToReserve;
 
-            this.liquidity.getReserve().putUniform(addToReserve);
+            this.liquidity.reserve.putUniform(addToReserve);
             this.currentTick.deposit(addToCurTick);
         }
 
-        this.liquidity.getInventory().notifyReserveChanged();
+        this.liquidity.inventory.notifyReserveChanged();
         this.depositedReserve += args.reserve;
     }
 
@@ -132,9 +136,9 @@ export class AMM {
         let reserve = 0;
         let inventory = 0;
 
-        if (this.liquidity.getReserve().isInitted()) {
-            reserve += this.liquidity.getReserve().withdrawCut(cut);
-            this.liquidity.getInventory().notifyReserveChanged();
+        if (this.liquidity.reserve.isInitted()) {
+            reserve += this.liquidity.reserve.withdrawCut(cut);
+            this.liquidity.inventory.notifyReserveChanged();
         }
 
         if (this.currentTick) {
@@ -144,30 +148,32 @@ export class AMM {
             inventory += i;
         }
 
-        if (!this.liquidity.getInventory().isEmpty()) {
+        if (!this.liquidity.inventory.isEmpty()) {
             let respectiveReserve =
-                this.liquidity.getInventory().respectiveReserve * cut;
+                this.liquidity.inventory.respectiveReserve * cut;
 
             // swapping backwards, which makes early leavers get a worse return, but resolves the IL faster and has better performance
 
             while (!almostEq(respectiveReserve, 0)) {
-                const worstTick = this.liquidity.getInventory().takeRight();
+                const worstTick = this.liquidity.inventory.takeWorst();
                 if (!worstTick) panic("Worst tick should exist");
 
                 const worstTickRespectiveReserve =
                     worstTick.inventory *
-                    tickToPrice(worstTick.idx, "inventory");
+                    absoluteTickToPrice(worstTick.idx, this.side, "inventory");
 
                 if (worstTickRespectiveReserve >= respectiveReserve) {
                     const takeInventory =
                         respectiveReserve *
-                        tickToPrice(worstTick.idx, "reserve");
+                        absoluteTickToPrice(
+                            worstTick.idx,
+                            this.side,
+                            "reserve"
+                        );
                     worstTick.inventory -= takeInventory;
 
                     if (!almostEq(worstTick.inventory, 0)) {
-                        this.liquidity
-                            .getInventory()
-                            .putRightNewRange(worstTick);
+                        this.liquidity.inventory.putWorstNewRange(worstTick);
                     }
 
                     inventory += takeInventory;
@@ -180,7 +186,7 @@ export class AMM {
 
                 if (
                     !almostEq(respectiveReserve, 0) &&
-                    this.liquidity.getInventory().isEmpty()
+                    this.liquidity.inventory.isEmpty()
                 ) {
                     panic(
                         `Still missing ${respectiveReserve} respective reserve, but the inventory is empty`
@@ -194,9 +200,9 @@ export class AMM {
         return { reserve, inventory };
     }
 
-    public drift(targetLeft: TickIndex) {
-        if (!this.liquidity.getReserve().isInitted()) return;
-        if (this.liquidity.getReserve().peekLeft()?.idx.eq(targetLeft)) return;
+    public drift(targetLeft: number) {
+        if (!this.liquidity.reserve.isInitted()) return;
+        if (this.liquidity.reserve.peekWorst()?.idx === targetLeft) return;
 
         this.liquidity.driftReserve(targetLeft);
     }
@@ -206,43 +212,42 @@ export class AMM {
     }
 
     public getRightInventoryTick() {
-        return this.liquidity.getInventory().peekRight();
+        return this.liquidity.inventory.peekWorst();
     }
 
     public getLeftInventoryTick() {
-        return this.liquidity.getInventory().peekLeft();
+        return this.liquidity.inventory.peekBest();
     }
 
-    public getLiquidityDigest(tickSpan: number): LiquidityDigest {
-        const wt = this.currentTick.getRecoveryBin().getWorstTick();
+    public getLiquidityDigest(): LiquidityDigest {
+        const wt = this.currentTick.getRecoveryBin().worstTick;
 
         return {
             curTick: {
-                idx: this.currentTick.index.clone(),
+                idx: this.currentTick.index,
                 ...this.currentTick.getLiquidity(),
             },
             recoveryBin: {
-                collateral: this.currentTick.getRecoveryBin().getCollateral(),
+                collateral: this.currentTick.getRecoveryBin().collateral,
                 worstTick: wt
                     ? { qty: wt.inventory, tickIdx: wt.idx }
                     : undefined,
             },
-            reserve: this.liquidity.getReserve().getRange(),
-            inventory: this.liquidity.getInventory().getRanges(),
+            reserve: this.liquidity.reserve.getRange(),
+            inventory: this.liquidity.inventory.getRanges(),
         };
     }
 
     public get il(): number {
-        if (almostEq(this.liquidity.getInventory().qty, 0)) {
+        if (almostEq(this.liquidity.inventory.qty, 0)) {
             return 0;
         }
 
         const actualReserve =
-            this.liquidity.getInventory().qty *
-            tickToPrice(this.curTick.index.clone(), "inventory");
+            this.liquidity.inventory.qty *
+            absoluteTickToPrice(this.curTick.index, this.side, "inventory");
 
-        const respectiveReserve =
-            this.liquidity.getInventory().respectiveReserve;
+        const respectiveReserve = this.liquidity.inventory.respectiveReserve;
 
         // FIXME: for some reason this one is always negative
         // FIXME: this also should be calculated with the whole reserve in mind
@@ -254,28 +259,24 @@ export class AMM {
     }
 
     public getActualReserve(): number {
-        return (
-            this.liquidity.getReserve().qty +
-            this.curTick.getLiquidity().reserve
-        );
+        return this.liquidity.reserve.qty + this.curTick.getLiquidity().reserve;
     }
 
     public getActualInventory(): number {
         return (
-            this.liquidity.getInventory().qty +
-            this.curTick.getLiquidity().inventory
+            this.liquidity.inventory.qty + this.curTick.getLiquidity().inventory
         );
     }
 
     public getRespectiveReserve(): number {
         return (
-            this.liquidity.getInventory().respectiveReserve +
+            this.liquidity.inventory.respectiveReserve +
             this.curTick.getLiquidity().inventory *
-                tickToPrice(this.curTick.index.clone(), "inventory")
+                absoluteTickToPrice(this.curTick.index, this.side, "inventory")
         );
     }
 
-    public toString() {
-        return this.name;
+    public isBase() {
+        return this.side === "base";
     }
 }

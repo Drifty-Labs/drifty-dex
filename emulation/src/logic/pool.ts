@@ -1,8 +1,7 @@
 import { AMM } from "./amm.ts";
 import { type AMMSwapDirection } from "./cur-tick.ts";
 import { InventoryRange, ReserveRange } from "./range.ts";
-import { TickIndex } from "./ticks.ts";
-import { almostEq, panic, type TwoSided } from "./utils.ts";
+import { almostEq, panic, type TwoSided, type Side } from "./utils.ts";
 
 const STABLE_AMM_CUT = 0.05;
 const MIN_FEES = 0.0001;
@@ -35,16 +34,13 @@ export class Pool {
             quoteQty: number;
         }
     ) {
-        const baseTickIdx = new TickIndex(true, -curTickIdx);
-        const quoteTickIdx = baseTickIdx.clone(true);
-
         if (args) {
             const stableBaseShare = args.baseQty * STABLE_AMM_CUT;
             const stableQuoteShare = args.quoteQty * STABLE_AMM_CUT;
 
             this.stableAMM = {
-                base: new AMM("StableBase", baseTickIdx.clone()),
-                quote: new AMM("StableQuote", quoteTickIdx.clone()),
+                base: new AMM("base", curTickIdx),
+                quote: new AMM("quote", curTickIdx),
             };
 
             this.stableAMM.base.deposit({ reserve: stableBaseShare });
@@ -60,12 +56,12 @@ export class Pool {
             const dbi = driftingQuoteShare - dqr;
 
             this.driftingAMM = {
-                base: new AMM("DriftingBase", baseTickIdx.clone(), {
+                base: new AMM("base", curTickIdx, {
                     reserveQty: dbr,
                     inventoryQty: dbi,
                     tickSpan: tickSpan,
                 }),
-                quote: new AMM("DriftingQuote", quoteTickIdx.clone(), {
+                quote: new AMM("quote", curTickIdx, {
                     reserveQty: dqr,
                     inventoryQty: dqi,
                     tickSpan: tickSpan,
@@ -73,21 +69,18 @@ export class Pool {
             };
         } else {
             this.stableAMM = {
-                base: new AMM("StableBase", baseTickIdx.clone()),
-                quote: new AMM("StableQuote", quoteTickIdx.clone()),
+                base: new AMM("base", curTickIdx),
+                quote: new AMM("quote", curTickIdx),
             };
             this.driftingAMM = {
-                base: new AMM("DriftingBase", baseTickIdx.clone()),
-                quote: new AMM("DriftingQuote", quoteTickIdx.clone()),
+                base: new AMM("base", curTickIdx),
+                quote: new AMM("quote", curTickIdx),
             };
         }
     }
 
     public clone() {
-        const p = new Pool(
-            this.driftingAMM.quote.curTick.index.clone().toAbsolute(),
-            this.tickSpan
-        );
+        const p = new Pool(this.driftingAMM.quote.curTick.index, this.tickSpan);
 
         p.stableAMM.base = this.stableAMM.base.clone();
         p.stableAMM.quote = this.stableAMM.quote.clone();
@@ -102,14 +95,13 @@ export class Pool {
         const baseWorst = this.driftingAMM.base.getRightInventoryTick();
 
         if (baseWorst !== undefined) {
-            console.log(this.clone(), baseWorst.idx.toAbsolute());
-            this.driftingAMM.quote.drift(baseWorst.idx.clone(true));
+            this.driftingAMM.quote.drift(baseWorst.idx);
         }
 
         const quoteWorst = this.driftingAMM.quote.getRightInventoryTick();
 
         if (quoteWorst !== undefined) {
-            this.driftingAMM.base.drift(quoteWorst.idx.clone(true));
+            this.driftingAMM.base.drift(quoteWorst.idx);
         }
     }
 
@@ -146,15 +138,10 @@ export class Pool {
 
         this.stableAMM[side].deposit({ reserve: stableCut });
 
-        const oppositeSide = side === "base" ? "quote" : "base";
-        const worstInventory =
-            this.driftingAMM[oppositeSide].getRightInventoryTick();
-
-        const leftBound = worstInventory
-            ? worstInventory.idx.clone()
-            : this.driftingAMM[side].curTick.index.clone().sub(this.tickSpan);
-
-        this.driftingAMM[side].deposit({ reserve: driftingCut, leftBound });
+        this.driftingAMM[side].deposit({
+            reserve: driftingCut,
+            tickSpan: this.tickSpan,
+        });
     }
 
     public withdraw(side: keyof TwoSided<AMM>, qty: number) {
@@ -218,9 +205,7 @@ export class Pool {
                     if (recoveredReserve > 0) {
                         amm.deposit({
                             reserve: recoveredReserve,
-                            leftBound: amm.curTick.index
-                                .clone()
-                                .sub(this.tickSpan),
+                            tickSpan: this.tickSpan,
                         });
                     }
                 }
@@ -245,16 +230,6 @@ export class Pool {
                     this.stableAMM.quote.curTick.nextInventoryTick();
                     this.driftingAMM.quote.curTick.nextInventoryTick();
                 }
-
-                const indices = amms.map(([it, _]) =>
-                    Math.abs(it.curTick.index.index())
-                );
-                const allSame = indices.every((idx) => idx === indices[0]);
-                if (!allSame) {
-                    panic(
-                        `After tick move some ticks are different, while should be the same! ${indices}`
-                    );
-                }
             } else if (!hasAny) {
                 panic("No progress and no qty left - swap complete");
             }
@@ -264,7 +239,7 @@ export class Pool {
     }
 
     public getCurAbsoluteTick(): number {
-        return this.driftingAMM.base.curTick.index.clone().toAbsolute();
+        return this.driftingAMM.base.curTick.index;
     }
 
     public getDepositedReserves(): TwoSided<number> {
@@ -322,20 +297,20 @@ export class Pool {
         return MIN_FEES + (il <= 0.9 ? (MAX_FEES * il) / 0.9 : MAX_FEES);
     }
 
-    public getLiquidityDigest(tickSpan: number): LiquidityDigestAbsolute {
-        const db = this.driftingAMM.base.getLiquidityDigest(tickSpan);
-        const dq = this.driftingAMM.quote.getLiquidityDigest(tickSpan);
-        const sb = this.stableAMM.base.getLiquidityDigest(tickSpan);
-        const sq = this.stableAMM.quote.getLiquidityDigest(tickSpan);
+    public getLiquidityDigest(): LiquidityDigestAbsolute {
+        const db = this.driftingAMM.base.getLiquidityDigest();
+        const dq = this.driftingAMM.quote.getLiquidityDigest();
+        const sb = this.stableAMM.base.getLiquidityDigest();
+        const sq = this.stableAMM.quote.getLiquidityDigest();
 
         // collect and verify current tick idx invariant
 
-        const curIdx = db.curTick.idx.toAbsolute();
+        const curIdx = db.curTick.idx;
         if (
-            db.curTick.idx.toAbsolute() !== curIdx ||
-            dq.curTick.idx.toAbsolute() !== curIdx ||
-            sb.curTick.idx.toAbsolute() !== curIdx ||
-            sq.curTick.idx.toAbsolute() !== curIdx
+            db.curTick.idx !== curIdx ||
+            dq.curTick.idx !== curIdx ||
+            sb.curTick.idx !== curIdx ||
+            sq.curTick.idx !== curIdx
         ) {
             panic(`Ticks don't match`);
         }

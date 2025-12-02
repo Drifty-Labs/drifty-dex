@@ -25,7 +25,7 @@ Deno.test("Reserve Manager - Lifecycle (Normal)", () => {
     // Range [100, 110]. Best is 110.
     // We must pass the expected tick index (110).
     const tick110 = factory.make(110);
-    const best = reserve.takeRight(tick110);
+    const best = reserve.takeBest(tick110);
     assertEquals(best?.idx.toAbsolute(), 110);
     assertEquals(best?.reserve, 100); // 1100 / 11
 
@@ -34,7 +34,7 @@ Deno.test("Reserve Manager - Lifecycle (Normal)", () => {
     // But if we ask for 100 (far left), it should panic because best is 109.
     const tick100 = factory.make(100);
     assertThrows(
-        () => reserve.takeRight(tick100),
+        () => reserve.takeBest(tick100),
         Error,
         "Reserve invariant violated"
     );
@@ -78,7 +78,7 @@ Deno.test("Reserve Manager - Lifecycle (Inverted)", () => {
 
     // Take Best (Rightmost, closest to price) -> -100 (Abs 100)
     const tick100 = factory.make(100);
-    const best = reserve.takeRight(tick100);
+    const best = reserve.takeBest(tick100);
     assertEquals(best?.idx.toAbsolute(), 100);
 
     // Take Worst (Leftmost, furthest from price) -> -110 (Abs 110)
@@ -93,7 +93,7 @@ Deno.test("Inventory Manager - Lifecycle & Flows", () => {
     // 1. Put Best (Simulate Decrement / Moving Left)
     // Scenario: Price moves from 102 to 101. We put 101 into inventory.
     const tick101 = factory.make(101);
-    inventory.putLeft({ idx: tick101, inventory: 100 });
+    inventory.putBest({ idx: tick101, inventory: 100 });
 
     assertEquals(inventory.qty(), 100);
     assertEquals(inventory.isEmpty(), false);
@@ -106,7 +106,7 @@ Deno.test("Inventory Manager - Lifecycle & Flows", () => {
     // Scenario: Price moves from 101 to 100. We put 100 into inventory.
     // 100 < 101, so this is valid (extending range to the left/lower index).
     const tick100 = factory.make(100);
-    inventory.putLeft({ idx: tick100, inventory: 100 });
+    inventory.putBest({ idx: tick100, inventory: 100 });
     assertEquals(inventory.qty(), 200);
 
     // 2b. Invariant Violation Check (Put Best)
@@ -114,7 +114,7 @@ Deno.test("Inventory Manager - Lifecycle & Flows", () => {
     // Inventory must be filled in descending order (as price drops).
     const tick102 = factory.make(102);
     assertThrows(
-        () => inventory.putLeft({ idx: tick102, inventory: 100 }),
+        () => inventory.putBest({ idx: tick102, inventory: 100 }),
         Error,
         "Inventory invariant violated"
     );
@@ -126,31 +126,31 @@ Deno.test("Inventory Manager - Lifecycle & Flows", () => {
     // Scenario: Price dropped significantly, now at 90.
     // We put 90 into inventory. 90 < 100, so valid.
     const tick90 = factory.make(90);
-    inventory.putLeft({ idx: tick90, inventory: 100 });
+    inventory.putBest({ idx: tick90, inventory: 100 });
     assertEquals(inventory.qty(), 300);
 
     // 5. Take Best (Simulate Increment / Moving Right)
     // Scenario: Price rises. We consume inventory starting from the lowest index (closest to price).
     // Ranges: [90] and [100, 101].
     // Best is 90.
-    const best90 = inventory.takeLeft(tick90);
+    const best90 = inventory.takeBest(tick90);
     assertEquals(best90?.idx.toAbsolute(), 90);
 
     // Now [90] is empty. Next best is 100.
-    const best100 = inventory.takeLeft(tick100);
+    const best100 = inventory.takeBest(tick100);
     assertEquals(best100?.idx.toAbsolute(), 100);
 
     // 6. Put Worst New Range
     // Scenario: Recovery/Rebalancing adds a range at the far end (Highest Index).
     // Current Worst is 101. New Worst must be > 101.
     const tick105 = factory.make(105);
-    inventory.putRightNewRange({ idx: tick105, inventory: 50 });
+    inventory.putWorstNewRange({ idx: tick105, inventory: 50 });
 
     // 6b. Invariant Violation Check (Put Worst)
     // If we try to put 104 (less than current worst 105), it should panic.
     const tick104 = factory.make(104);
     assertThrows(
-        () => inventory.putRightNewRange({ idx: tick104, inventory: 50 }),
+        () => inventory.putWorstNewRange({ idx: tick104, inventory: 50 }),
         Error,
         "Inventory invariant violated"
     );
@@ -168,16 +168,16 @@ Deno.test("Inventory Manager - Inverted", () => {
     // We put ticks in descending order of relative index.
     // Tick -100 (Abs 100).
     const tick100 = factory.make(100); // Rel -100
-    inventory.putLeft({ idx: tick100, inventory: 100 });
+    inventory.putBest({ idx: tick100, inventory: 100 });
 
     // 2. Put Best (Next Lower Relative)
     // Tick -101 (Abs 101). -101 < -100. Valid.
     const tick101 = factory.make(101); // Rel -101
-    inventory.putLeft({ idx: tick101, inventory: 100 });
+    inventory.putBest({ idx: tick101, inventory: 100 });
 
     // 3. Take Best (Closest to Price / Lowest Relative)
     // Best is -101 (Abs 101).
-    const best = inventory.takeLeft(tick101);
+    const best = inventory.takeBest(tick101);
     assertEquals(best?.idx.toAbsolute(), 101);
 });
 
@@ -202,11 +202,11 @@ Deno.test("Symmetry - Base vs Quote", () => {
 
     // Base Best -> 990.
     const baseBestTick = normalFactory.make(990);
-    assertEquals(baseReserve.takeRight(baseBestTick)?.idx.toAbsolute(), 990);
+    assertEquals(baseReserve.takeBest(baseBestTick)?.idx.toAbsolute(), 990);
 
     // Quote Best -> 1010.
     const quoteBestTick = invertedFactory.make(1010);
-    assertEquals(quoteReserve.takeRight(quoteBestTick)?.idx.toAbsolute(), 1010);
+    assertEquals(quoteReserve.takeBest(quoteBestTick)?.idx.toAbsolute(), 1010);
 });
 
 Deno.test("Peek Methods - Reserve & Inventory", () => {
@@ -219,13 +219,13 @@ Deno.test("Peek Methods - Reserve & Inventory", () => {
     reserve.init(1100, rLeft, rRight);
 
     // Peek Best (110)
-    const peekRBest = reserve.peekRight();
+    const peekRBest = reserve.peekBest();
     assertEquals(peekRBest?.idx.toAbsolute(), 110);
     assertEquals(peekRBest?.reserve, 100);
     assertEquals(reserve.width, 11); // Should not change
 
     // Peek Worst (100)
-    const peekRWorst = reserve.peekLeft();
+    const peekRWorst = reserve.peekWorst();
     assertEquals(peekRWorst?.idx.toAbsolute(), 100);
     assertEquals(peekRWorst?.reserve, 100);
     assertEquals(reserve.width, 11); // Should not change
@@ -233,16 +233,16 @@ Deno.test("Peek Methods - Reserve & Inventory", () => {
     // Inventory Peek
     const inventory = new Inventory();
     const tick100 = factory.make(100);
-    inventory.putLeft({ idx: tick100, inventory: 100 });
+    inventory.putBest({ idx: tick100, inventory: 100 });
 
     // Peek Best (100)
-    const peekIBest = inventory.peekLeft();
+    const peekIBest = inventory.peekBest();
     assertEquals(peekIBest?.idx.toAbsolute(), 100);
     assertEquals(peekIBest?.inventory, 100);
     assertEquals(inventory.qty(), 100); // Should not change
 
     // Peek Worst (100)
-    const peekIWorst = inventory.peekRight();
+    const peekIWorst = inventory.peekWorst();
     assertEquals(peekIWorst?.idx.toAbsolute(), 100);
     assertEquals(peekIWorst?.inventory, 100);
     assertEquals(inventory.qty(), 100); // Should not change
@@ -250,14 +250,14 @@ Deno.test("Peek Methods - Reserve & Inventory", () => {
     // Add another tick to Inventory (90) - Simulate gap
     inventory.notifyReserveChanged();
     const tick90 = factory.make(90);
-    inventory.putLeft({ idx: tick90, inventory: 100 });
+    inventory.putBest({ idx: tick90, inventory: 100 });
 
     // Peek Best (90)
-    const peekIBest2 = inventory.peekLeft();
+    const peekIBest2 = inventory.peekBest();
     assertEquals(peekIBest2?.idx.toAbsolute(), 90);
 
     // Peek Worst (100) - Still 100 because it's in the older range
-    const peekIWorst2 = inventory.peekRight();
+    const peekIWorst2 = inventory.peekWorst();
     assertEquals(peekIWorst2?.idx.toAbsolute(), 100);
 });
 
@@ -296,7 +296,7 @@ Deno.test("Symmetry - Realistic Flow (Base -> Quote -> Base)", () => {
         const quoteTick = invertedFactory.make(p);
 
         // Quote takes from Reserve (at p).
-        const qResTick = quoteReserve.takeRight(quoteTick);
+        const qResTick = quoteReserve.takeBest(quoteTick);
         assertEquals(qResTick?.idx.toAbsolute(), p);
 
         // Quote puts to Inventory (at p-1).
@@ -306,18 +306,18 @@ Deno.test("Symmetry - Realistic Flow (Base -> Quote -> Base)", () => {
         // Ensure we can spawn new range if empty (first iteration)
         if (quoteInventory.isEmpty()) quoteInventory.notifyReserveChanged();
 
-        quoteInventory.putLeft({ idx: prevTick, inventory: qResTick!.reserve });
+        quoteInventory.putBest({ idx: prevTick, inventory: qResTick!.reserve });
     }
 
     // Verify State after Phase 1
     // Base: Reserve stretched to 1005.
-    assertEquals(baseReserve.peekRight()?.idx.toAbsolute(), 1005);
+    assertEquals(baseReserve.peekBest()?.idx.toAbsolute(), 1005);
 
     // Quote: Reserve consumed up to 1005. Best is 1006.
-    assertEquals(quoteReserve.peekRight()?.idx.toAbsolute(), 1006);
+    assertEquals(quoteReserve.peekBest()?.idx.toAbsolute(), 1006);
 
     // Quote: Inventory has [1000, 1004]. Best (Left) is 1004.
-    assertEquals(quoteInventory.peekLeft()?.idx.toAbsolute(), 1004);
+    assertEquals(quoteInventory.peekBest()?.idx.toAbsolute(), 1004);
     assertEquals(quoteInventory.isEmpty(), false);
 
     // Quote: respectiveReserve should be > 0 (we've accumulated inventory)
@@ -332,12 +332,12 @@ Deno.test("Symmetry - Realistic Flow (Base -> Quote -> Base)", () => {
         const tick = normalFactory.make(p);
 
         // Base AMM: Takes from Reserve (at p).
-        const bResTick = baseReserve.takeRight(tick);
+        const bResTick = baseReserve.takeBest(tick);
         assertEquals(bResTick?.idx.toAbsolute(), p);
 
         // Quote AMM: Takes from Inventory and recovers to Reserve.
         const quoteTick = invertedFactory.make(p - 1);
-        const qInvTick = quoteInventory.takeLeft(quoteTick);
+        const qInvTick = quoteInventory.takeBest(quoteTick);
         assertEquals(qInvTick?.idx.toAbsolute(), p - 1);
 
         // Quote recovers IL: Put back to Reserve.
@@ -349,7 +349,7 @@ Deno.test("Symmetry - Realistic Flow (Base -> Quote -> Base)", () => {
     // Verify Final State - Full Recovery
 
     // Base: Reserve consumed down to 1000. Best is 1000.
-    assertEquals(baseReserve.peekRight()?.idx.toAbsolute(), 1000);
+    assertEquals(baseReserve.peekBest()?.idx.toAbsolute(), 1000);
 
     // Quote: Inventory Empty (Full Recovery).
     assertEquals(quoteInventory.isEmpty(), true);
@@ -368,9 +368,9 @@ Deno.test("Symmetry - Realistic Flow (Base -> Quote -> Base)", () => {
     // After Phase 2: [1000, 1100] = 101 width (stretched to 1000).
     assertEquals(quoteReserve.width, initialQuoteReserveWidth + 1);
     // Quote Reserve Best (Right, closest to price) is 1000.
-    assertEquals(quoteReserve.peekRight()?.idx.toAbsolute(), 1000);
+    assertEquals(quoteReserve.peekBest()?.idx.toAbsolute(), 1000);
     // Quote Reserve Worst (Left, furthest from price) is 1100.
-    assertEquals(quoteReserve.peekLeft()?.idx.toAbsolute(), 1100);
+    assertEquals(quoteReserve.peekWorst()?.idx.toAbsolute(), 1100);
 });
 
 Deno.test("Boundary Conditions - MIN/MAX Tick", () => {

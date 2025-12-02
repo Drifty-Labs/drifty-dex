@@ -49,7 +49,7 @@ Deno.test("RecoveryBin - Recovery With Worst Tick", () => {
     const bin = new RecoveryBin(new Reserve() as any, inventory as any);
 
     const factory = new TickIndexFactory(false);
-    inventory.putRightNewRange({
+    inventory.putWorstNewRange({
         idx: factory.make(1000),
         inventory: 100,
     });
@@ -69,7 +69,7 @@ Deno.test("RecoveryBin - WithdrawCut", () => {
     const bin = new RecoveryBin(new Reserve() as any, inventory as any);
 
     const factory = new TickIndexFactory(false);
-    inventory.putRightNewRange({
+    inventory.putWorstNewRange({
         idx: factory.make(1000),
         inventory: 100,
     });
