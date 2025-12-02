@@ -1,14 +1,8 @@
 import { AMM } from "./amm.ts";
 import { type AMMSwapDirection } from "./cur-tick.ts";
+import { InventoryRange, ReserveRange } from "./range.ts";
 import { TickIndex } from "./ticks.ts";
-import {
-    absoluteTickToPrice,
-    almostEq,
-    panic,
-    TEN_PERCENT_TICKS,
-    type TwoSided,
-} from "./utils.ts";
-import { OrderedMap } from "@js-sdsl/ordered-map";
+import { almostEq, panic, type TwoSided } from "./utils.ts";
 
 const STABLE_AMM_CUT = 0.05;
 const MIN_FEES = 0.0001;
@@ -29,11 +23,70 @@ export class Pool {
     private stableAMM: TwoSided<AMM>;
     private driftingAMM: TwoSided<AMM>;
 
-    public clone(epheremal: boolean) {
+    /**
+     * Creates a new `Pool`.
+     * @param curTickIdx The initial tick index for the pool.
+     */
+    constructor(
+        curTickIdx: number,
+        private tickSpan: number,
+        args?: {
+            baseQty: number;
+            quoteQty: number;
+        }
+    ) {
+        const baseTickIdx = new TickIndex(true, -curTickIdx);
+        const quoteTickIdx = baseTickIdx.clone(true);
+
+        if (args) {
+            const stableBaseShare = args.baseQty * STABLE_AMM_CUT;
+            const stableQuoteShare = args.quoteQty * STABLE_AMM_CUT;
+
+            this.stableAMM = {
+                base: new AMM("StableBase", baseTickIdx.clone()),
+                quote: new AMM("StableQuote", quoteTickIdx.clone()),
+            };
+
+            this.stableAMM.base.deposit({ reserve: stableBaseShare });
+            this.stableAMM.quote.deposit({ reserve: stableQuoteShare });
+
+            const driftingBaseShare = args.baseQty - stableBaseShare;
+            const driftingQuoteShare = args.quoteQty - stableQuoteShare;
+
+            const dbr = driftingBaseShare / 2;
+            const dqi = driftingBaseShare - dbr;
+
+            const dqr = driftingQuoteShare / 2;
+            const dbi = driftingQuoteShare - dqr;
+
+            this.driftingAMM = {
+                base: new AMM("DriftingBase", baseTickIdx.clone(), {
+                    reserveQty: dbr,
+                    inventoryQty: dbi,
+                    tickSpan: tickSpan,
+                }),
+                quote: new AMM("DriftingQuote", quoteTickIdx.clone(), {
+                    reserveQty: dqr,
+                    inventoryQty: dqi,
+                    tickSpan: tickSpan,
+                }),
+            };
+        } else {
+            this.stableAMM = {
+                base: new AMM("StableBase", baseTickIdx.clone()),
+                quote: new AMM("StableQuote", quoteTickIdx.clone()),
+            };
+            this.driftingAMM = {
+                base: new AMM("DriftingBase", baseTickIdx.clone()),
+                quote: new AMM("DriftingQuote", quoteTickIdx.clone()),
+            };
+        }
+    }
+
+    public clone() {
         const p = new Pool(
-            this.tickSpan,
-            this.driftingAMM.base.curTick.index.toAbsolute(),
-            epheremal
+            this.driftingAMM.quote.curTick.index.clone().toAbsolute(),
+            this.tickSpan
         );
 
         p.stableAMM.base = this.stableAMM.base.clone();
@@ -49,6 +102,7 @@ export class Pool {
         const baseWorst = this.driftingAMM.base.getRightInventoryTick();
 
         if (baseWorst !== undefined) {
+            console.log(this.clone(), baseWorst.idx.toAbsolute());
             this.driftingAMM.quote.drift(baseWorst.idx.clone(true));
         }
 
@@ -60,14 +114,9 @@ export class Pool {
     }
 
     public swap(args: SwapArgs): SwapResult {
-        const fees = args.qtyIn * this.getFees();
+        const feeFactor = this.getFees();
+        const fees = args.qtyIn * feeFactor;
         const qtyIn = args.qtyIn - fees;
-
-        /* console.log(
-            `Incoming ${args.direction} swap, qty = ${qtyIn} ${
-                args.direction === "base -> quote" ? "base" : "quote"
-            }, fees = ${fees}, curtick: ${this.driftingAMM.base.curTick.index.toAbsolute()}`
-        ); */
 
         const stableFees = fees * STABLE_AMM_CUT;
         const driftingFees = fees - stableFees;
@@ -86,12 +135,6 @@ export class Pool {
             qtyOut = this._swap(qtyIn, args.direction);
         }
 
-        /* console.log(
-            `Received ${qtyOut} ${
-                args.direction === "base -> quote" ? "quote" : "base"
-            }, curtick: ${this.driftingAMM.base.curTick.index.toAbsolute()}`
-        );
- */
         this.drift();
 
         return { qtyOut };
@@ -109,7 +152,7 @@ export class Pool {
 
         const leftBound = worstInventory
             ? worstInventory.idx.clone()
-            : this.driftingAMM[side].curTick.index.sub(this.tickSpan);
+            : this.driftingAMM[side].curTick.index.clone().sub(this.tickSpan);
 
         this.driftingAMM[side].deposit({ reserve: driftingCut, leftBound });
     }
@@ -136,42 +179,29 @@ export class Pool {
             quoteDirection = "reserve -> inventory";
         }
 
-        const amms: [AMM, AMMSwapDirection][] = [
-            [this.stableAMM.base, baseDirection],
-            [this.driftingAMM.base, baseDirection],
-            [this.stableAMM.quote, quoteDirection],
-            [this.driftingAMM.quote, quoteDirection],
+        const amms: [AMM, AMMSwapDirection, number][] = [
+            [this.stableAMM.base, baseDirection, 0],
+            [this.driftingAMM.base, baseDirection, 0],
+            [this.stableAMM.quote, quoteDirection, 0],
+            [this.driftingAMM.quote, quoteDirection, 0],
         ];
 
         while (!almostEq(qtyIn, 0)) {
             let hasAny = false;
 
             // Keep swapping with each AMM until it's fully exhausted
-            for (const [amm, direction] of amms) {
+            for (const amm of amms) {
                 const {
                     qtyOut: q,
                     reminderIn,
                     recoveredReserve,
-                } = amm.curTick.swap({
-                    direction,
+                } = amm[0].curTick.swap({
+                    direction: amm[1],
                     qtyIn,
                 });
 
-                /* if (q > 0) {
-                    console.log(
-                        `[${amm.toString()}]`,
-                        `Swap tick (${amm.curTick.index.toAbsolute()}):`,
-                        `qtyIn: ${
-                            qtyIn - reminderIn
-                        }, qtyOut: ${q}, recoveredReserve: ${recoveredReserve}`
-                    );
-                } */
-
                 if (recoveredReserve > 0) {
-                    amm.deposit({
-                        reserve: recoveredReserve,
-                        leftBound: amm.curTick.index.sub(this.tickSpan),
-                    });
+                    amm[2] += recoveredReserve;
                 }
 
                 if (reminderIn < qtyIn) {
@@ -180,7 +210,22 @@ export class Pool {
                     qtyOut += q;
                 }
 
-                if (almostEq(qtyIn, 0)) return qtyOut;
+                if (almostEq(qtyIn, 0)) break;
+            }
+
+            if (almostEq(qtyIn, 0)) {
+                for (const [amm, _, recoveredReserve] of amms) {
+                    if (recoveredReserve > 0) {
+                        amm.deposit({
+                            reserve: recoveredReserve,
+                            leftBound: amm.curTick.index
+                                .clone()
+                                .sub(this.tickSpan),
+                        });
+                    }
+                }
+
+                return qtyOut;
             }
 
             // Check if we should move ticks
@@ -219,7 +264,7 @@ export class Pool {
     }
 
     public getCurAbsoluteTick(): number {
-        return this.driftingAMM.base.curTick.index.toAbsolute();
+        return this.driftingAMM.base.curTick.index.clone().toAbsolute();
     }
 
     public getDepositedReserves(): TwoSided<number> {
@@ -283,49 +328,6 @@ export class Pool {
         const sb = this.stableAMM.base.getLiquidityDigest(tickSpan);
         const sq = this.stableAMM.quote.getLiquidityDigest(tickSpan);
 
-        let maxBaseTickQty = 0;
-
-        // combining all base ticks
-
-        const allBaseTicks = [
-            ...db.reserve,
-            ...dq.inventory,
-            ...sb.reserve,
-            ...sq.inventory,
-        ];
-        const baseTicks: OrderedMap<number, number> = new OrderedMap();
-
-        for (const tick of allBaseTicks) {
-            const idx = tick.tickIdx.toAbsolute();
-
-            const prev = baseTicks.getElementByKey(idx) ?? 0;
-            const qty = prev + tick.qty;
-            baseTicks.setElement(idx, qty);
-
-            maxBaseTickQty = Math.max(maxBaseTickQty, qty);
-        }
-
-        // combining all quote ticks
-
-        const allQuoteTicks = [
-            ...dq.reserve,
-            ...db.inventory,
-            ...sq.reserve,
-            ...sb.inventory,
-        ];
-        const quoteTicks: OrderedMap<number, number> = new OrderedMap();
-
-        for (const tick of allQuoteTicks) {
-            const idx = tick.tickIdx.toAbsolute();
-
-            const prev = quoteTicks.getElementByKey(idx) ?? 0;
-            const qty = prev + tick.qty;
-            quoteTicks.setElement(idx, qty);
-
-            const repsectiveBaseQty = qty * absoluteTickToPrice(idx, "quote");
-            maxBaseTickQty = Math.max(maxBaseTickQty, repsectiveBaseQty);
-        }
-
         // collect and verify current tick idx invariant
 
         const curIdx = db.curTick.idx.toAbsolute();
@@ -360,8 +362,14 @@ export class Pool {
             db.recoveryBin.collateral + sb.recoveryBin.collateral;
 
         return {
-            base: baseTicks,
-            quote: quoteTicks,
+            base: {
+                reserve: db.reserve,
+                inventory: db.inventory,
+            },
+            quote: {
+                reserve: dq.reserve,
+                inventory: dq.inventory,
+            },
             currentTick: {
                 idx: curIdx,
                 base: baseCurTickLiq,
@@ -371,7 +379,6 @@ export class Pool {
                 base: baseRecoveryBin,
                 quote: quoteRecoveryBin,
             },
-            maxBase: maxBaseTickQty,
         };
     }
 
@@ -413,72 +420,17 @@ export class Pool {
 
         return { base, quote };
     }
-
-    /**
-     * Creates a new `Pool`.
-     * @param curTickIdx The initial tick index for the pool.
-     */
-    constructor(
-        curTickIdx: number,
-        private tickSpan: number,
-        private epheremal: boolean,
-        args?: {
-            baseQty: number;
-            quoteQty: number;
-        }
-    ) {
-        const baseTickIdx = new TickIndex(true, -curTickIdx);
-        const quoteTickIdx = baseTickIdx.clone(true);
-
-        if (args) {
-            const stableBaseShare = args.baseQty * STABLE_AMM_CUT;
-            const stableQuoteShare = args.quoteQty * STABLE_AMM_CUT;
-
-            this.stableAMM = {
-                base: new AMM("StableBase", baseTickIdx.clone()),
-                quote: new AMM("StableQuote", quoteTickIdx.clone()),
-            };
-
-            this.stableAMM.base.deposit({ reserve: stableBaseShare });
-            this.stableAMM.quote.deposit({ reserve: stableQuoteShare });
-
-            const driftingBaseShare = args.baseQty - stableBaseShare;
-            const driftingQuoteShare = args.quoteQty - stableQuoteShare;
-
-            const dbr = driftingBaseShare / 2;
-            const dqi = driftingBaseShare - dbr;
-
-            const dqr = driftingQuoteShare / 2;
-            const dbi = driftingQuoteShare - dqr;
-
-            this.driftingAMM = {
-                base: new AMM("DriftingBase", baseTickIdx.clone(), {
-                    reserveQty: dbr,
-                    inventoryQty: dbi,
-                    tickSpan: tickSpan,
-                }),
-                quote: new AMM("DriftingQuote", quoteTickIdx.clone(), {
-                    reserveQty: dqr,
-                    inventoryQty: dqi,
-                    tickSpan: tickSpan,
-                }),
-            };
-        } else {
-            this.stableAMM = {
-                base: new AMM("StableBase", baseTickIdx.clone()),
-                quote: new AMM("StableQuote", quoteTickIdx.clone()),
-            };
-            this.driftingAMM = {
-                base: new AMM("DriftingBase", baseTickIdx.clone()),
-                quote: new AMM("DriftingQuote", quoteTickIdx.clone()),
-            };
-        }
-    }
 }
 
 export type LiquidityDigestAbsolute = {
-    base: OrderedMap<number, number>;
-    quote: OrderedMap<number, number>;
+    base: {
+        reserve?: ReserveRange;
+        inventory: InventoryRange[];
+    };
+    quote: {
+        reserve?: ReserveRange;
+        inventory: InventoryRange[];
+    };
     currentTick: {
         idx: number;
         base: number;
@@ -488,5 +440,4 @@ export type LiquidityDigestAbsolute = {
         base: number;
         quote: number;
     };
-    maxBase: number;
 };

@@ -1,72 +1,98 @@
-import { createEffect, createSignal, onMount, Show } from "solid-js";
+import { createSignal, onMount, Show } from "solid-js";
 import { LiquidityChart } from "./components/LiquidityChart.tsx";
 import { Pool, type SwapDirection } from "./logic/pool.ts";
-import { absoluteTickToPrice, panic } from "./logic/utils.ts";
+import { MAX_TICK, MIN_TICK, type Side } from "./logic/utils.ts";
 
-let pool = new Pool(1000, 90, false, { baseQty: 2000, quoteQty: 1000 });
+const START_TICK = 114000;
+const VISIBLE_TICKS = 200;
+const INIT_TICKS = 100;
 
-const calculateSlippage = (direction: SwapDirection, qty: number) => {
-    const p = pool.clone(true);
+let pool = new Pool(START_TICK, INIT_TICKS, {
+    baseQty: 11.2,
+    quoteQty: 1_000_000,
+});
 
-    try {
-        const expected =
-            qty *
-            absoluteTickToPrice(
-                p.getCurAbsoluteTick(),
-                direction === "base -> quote" ? "base" : "quote"
-            );
-        const { qtyOut: actual } = p.swap({ direction, qtyIn: qty });
+const tradeSize: { s: number; p: number }[] = [
+    { s: 0, p: 0 },
+    { s: 0.01, p: 0.5 },
+    { s: 0.05, p: 0.8 },
+    { s: 0.1, p: 0.95 },
+    { s: 0.2, p: 0.99 },
+];
 
-        if (actual > expected) panic("Slippage always exists");
+const calcQtyIn = (direction: SwapDirection, pool: Pool) => {
+    const side: Side = direction === "base -> quote" ? "base" : "quote";
+    const reserve = pool.getDepositedReserves()[side];
 
-        return 1 - actual / expected;
-    } catch (e) {
-        console.error(
-            `Error while calculating slippage. ${direction} ${qty}`,
-            e
-        );
-        return 1;
+    const r = Math.random();
+    let sCur = 0.01;
+
+    for (const { s, p } of tradeSize) {
+        if (r <= p) {
+            sCur = s;
+            break;
+        }
     }
+
+    return Math.random() * sCur * reserve;
 };
 
-const fitSlippage = (direction: SwapDirection, slippageTolerance: number) => {
-    let qty =
-        direction === "base -> quote"
-            ? pool.getDepositedReserves().base
-            : pool.getDepositedReserves().quote;
+const tickchange: { c: number; p: number }[] = [
+    { c: 0, p: 0 },
+    { c: 0, p: 0.6 },
+    { c: 0.01, p: 0.7 },
+    { c: 0.05, p: 0.9 },
+    { c: 0.1, p: 0.99 },
+    { c: 0.2, p: 0.999 },
+    { c: 0.4, p: 0.9999 },
+    { c: 0.8, p: 0.99999 },
+];
 
-    while (true) {
-        if (qty < 0.00000001) panic("Too high slippage");
+const newTargetTick = (oldTick: number) => {
+    const r = Math.random();
+    let cCur = 0;
 
-        const slippage = calculateSlippage(direction, qty);
-        if (slippage > slippageTolerance) {
-            qty /= 2;
-            continue;
+    for (const { c, p } of tickchange) {
+        if (r <= p) {
+            cCur = c;
+            break;
         }
-
-        break;
     }
 
-    return qty;
+    const sign = Math.random() > 0.5 ? 1 : -1;
+
+    let newTick = Math.floor(oldTick + sign * Math.random() * oldTick);
+    if (newTick >= MAX_TICK || newTick <= MIN_TICK) {
+        newTick = Math.floor(oldTick + sign * -1 * Math.random() * oldTick);
+    }
+
+    return newTick;
 };
 
 function App() {
     const [liquidity, setLiquidity] = createSignal(
-        pool.getLiquidityDigest(100)
+        pool.getLiquidityDigest(VISIBLE_TICKS)
     );
     const [stats, setStats] = createSignal(pool.getStats());
+    const [targetTick, setTargetTick] = createSignal(START_TICK);
     const [int, setInt] = createSignal<number | undefined>(undefined);
 
-    const swap = (direction?: SwapDirection) => {
+    const swap = (direction?: SwapDirection, qtyIn?: number) => {
+        const curTick = pool.getCurAbsoluteTick();
+
         direction = direction
             ? direction
-            : Math.random() > 0.5
+            : curTick === targetTick()
+            ? Math.random() > 0.5
+                ? "base -> quote"
+                : "quote -> base"
+            : curTick > targetTick()
             ? "base -> quote"
             : "quote -> base";
 
-        const qtyIn = fitSlippage(direction, 0.05);
+        qtyIn = qtyIn === undefined ? calcQtyIn(direction, pool) : qtyIn;
 
-        const cp = pool.clone(false);
+        const cp = pool.clone();
 
         try {
             cp.swap({ direction, qtyIn });
@@ -75,11 +101,16 @@ function App() {
             console.error("Bad swap, resetting...", e);
         }
 
-        const liquidity = pool.getLiquidityDigest(100);
+        const liquidity = pool.getLiquidityDigest(VISIBLE_TICKS);
 
         setLiquidity(liquidity);
         setStats(pool.getStats());
+        setTargetTick(newTargetTick);
     };
+
+    onMount(() => {
+        (window as any).swap = swap;
+    });
 
     const handleRunClick = () => {
         if (int()) {
@@ -104,8 +135,12 @@ function App() {
 
     return (
         <main class="relative w-dvw h-dvh flex flex-col gap-20 items-center bg-bg">
-            <div class="flex flex-col">
-                <LiquidityChart liquidity={liquidity()} />
+            <div class="flex flex-col relative">
+                <LiquidityChart
+                    liquidity={liquidity()}
+                    containerWidth={1000}
+                    containerHeight={500}
+                />
             </div>
 
             <div class="flex flex-col gap-2 text-white">
@@ -122,18 +157,34 @@ function App() {
             </div>
 
             <div class="flex flex-row gap-5">
-                <button class="bg-white text-black" onclick={handleRunClick}>
+                <button
+                    type="submit"
+                    class="bg-white text-black"
+                    onclick={handleRunClick}
+                >
                     {int() ? "Stop" : "Start"}
                 </button>
                 <Show when={!int()}>
-                    <button class="bg-white text-black" onclick={handleBtQ}>
+                    <button
+                        type="submit"
+                        class="bg-white text-black"
+                        onclick={handleBtQ}
+                    >
                         Base to quote
                     </button>
-                    <button class="bg-white text-black" onclick={handleQtB}>
+                    <button
+                        type="submit"
+                        class="bg-white text-black"
+                        onclick={handleQtB}
+                    >
                         Quote to base
                     </button>
                 </Show>
-                <button class="bg-white text-black" onclick={handleStateClick}>
+                <button
+                    type="submit"
+                    class="bg-white text-black"
+                    onclick={handleStateClick}
+                >
                     State
                 </button>
             </div>

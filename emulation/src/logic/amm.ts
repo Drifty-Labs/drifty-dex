@@ -1,6 +1,6 @@
 import { CurrentTick } from "./cur-tick.ts";
 import { Liquidity, type WithdrawResult } from "./liquidity.ts";
-import type { TakeResult } from "./range.ts";
+import type { InventoryRange, ReserveRange, TakeResult } from "./range.ts";
 import { TickIndex } from "./ticks.ts";
 import { almostEq, panic, tickToPrice } from "./utils.ts";
 
@@ -41,8 +41,8 @@ export type LiquidityDigest = {
         collateral: number;
         worstTick?: TakeResult;
     };
-    reserve: TakeResult[];
-    inventory: TakeResult[];
+    reserve?: ReserveRange;
+    inventory: InventoryRange[];
 };
 
 export class AMM {
@@ -50,20 +50,55 @@ export class AMM {
     private liquidity: Liquidity;
     private currentTick: CurrentTick;
 
+    constructor(
+        private name: string,
+        curTickIdx: TickIndex,
+        args?: {
+            reserveQty: number;
+            inventoryQty: number;
+            tickSpan: number;
+        },
+        liquidity?: Liquidity,
+        currentTick?: CurrentTick
+    ) {
+        this.liquidity = liquidity ? liquidity : new Liquidity();
+        this.currentTick = currentTick
+            ? currentTick
+            : new CurrentTick(this.name, curTickIdx.clone(), this.liquidity);
+
+        if (args) {
+            const fullWidth = args.tickSpan + 1;
+            const addToReserve = (args.reserveQty * args.tickSpan) / fullWidth;
+            const addToCurTick = args.reserveQty - addToReserve;
+
+            const respectiveReserve = this.liquidity.init(
+                addToReserve,
+                args.inventoryQty,
+                curTickIdx,
+                args.tickSpan
+            );
+            this.depositedReserve = args.reserveQty + respectiveReserve;
+
+            this.currentTick.deposit(addToCurTick);
+        }
+    }
+
     public clone() {
-        const a = new AMM(this.name, this.currentTick.index.clone());
+        const liq = this.liquidity.clone();
+        const ct = this.currentTick.clone(liq);
+
+        const a = new AMM(this.name, ct.index.clone(), undefined, liq, ct);
 
         a.depositedReserve = this.depositedReserve;
-        a.liquidity = this.liquidity.clone();
-        a.currentTick = this.currentTick.clone(a.liquidity);
 
         return a;
     }
 
     public deposit(args: DepositArgs): void {
         if (!this.liquidity.getReserve().isInitted()) {
-            const curTick = this.currentTick.index;
-            const leftBound = args.leftBound || curTick.min();
+            const curTick = this.currentTick.index.clone();
+            const leftBound =
+                args.leftBound === undefined ? curTick.min() : args.leftBound;
 
             const rightBound = curTick.clone();
             rightBound.dec();
@@ -72,6 +107,8 @@ export class AMM {
 
             const addToReserve = (args.reserve * (fullWidth - 1)) / fullWidth;
             const addToCurTick = args.reserve - addToReserve;
+
+            console.log("Deposit in", leftBound, rightBound);
 
             this.liquidity
                 .getReserve()
@@ -181,7 +218,7 @@ export class AMM {
 
         return {
             curTick: {
-                idx: this.currentTick.index,
+                idx: this.currentTick.index.clone(),
                 ...this.currentTick.getLiquidity(),
             },
             recoveryBin: {
@@ -190,12 +227,8 @@ export class AMM {
                     ? { qty: wt.inventory, tickIdx: wt.idx }
                     : undefined,
             },
-            reserve: this.liquidity
-                .getReserve()
-                .unpack(this.curTick.index.clone(), tickSpan),
-            inventory: this.liquidity
-                .getInventory()
-                .unpack(this.curTick.index.clone(), tickSpan),
+            reserve: this.liquidity.getReserve().getRange(),
+            inventory: this.liquidity.getInventory().getRanges(),
         };
     }
 
@@ -206,7 +239,7 @@ export class AMM {
 
         const actualReserve =
             this.liquidity.getInventory().qty *
-            tickToPrice(this.curTick.index, "inventory");
+            tickToPrice(this.curTick.index.clone(), "inventory");
 
         const respectiveReserve =
             this.liquidity.getInventory().respectiveReserve;
@@ -238,44 +271,11 @@ export class AMM {
         return (
             this.liquidity.getInventory().respectiveReserve +
             this.curTick.getLiquidity().inventory *
-                tickToPrice(this.curTick.index, "inventory")
+                tickToPrice(this.curTick.index.clone(), "inventory")
         );
     }
 
     public toString() {
         return this.name;
-    }
-
-    constructor(
-        private name: string,
-        curTickIdx: TickIndex,
-        args?: {
-            reserveQty: number;
-            inventoryQty: number;
-            tickSpan: number;
-        }
-    ) {
-        this.liquidity = new Liquidity();
-        this.currentTick = new CurrentTick(
-            this.name,
-            curTickIdx.clone(),
-            this.liquidity
-        );
-
-        if (args) {
-            const fullWidth = args.tickSpan + 1;
-            const addToReserve = (args.reserveQty * args.tickSpan) / fullWidth;
-            const addToCurTick = args.reserveQty - addToReserve;
-
-            const respectiveReserve = this.liquidity.init(
-                addToReserve,
-                args.inventoryQty,
-                curTickIdx,
-                args.tickSpan
-            );
-            this.depositedReserve = args.reserveQty + respectiveReserve;
-
-            this.currentTick.deposit(addToCurTick);
-        }
     }
 }

@@ -1,3 +1,4 @@
+import type { ReserveTick } from "./liquidity.ts";
 import { TickIndex } from "./ticks.ts";
 import { almostEq, panic, tickToPrice } from "./utils.ts";
 
@@ -20,8 +21,6 @@ export abstract class Range {
 
     public abstract takeBest(): TakeResult;
     public abstract takeWorst(): TakeResult;
-
-    public abstract unpack(curTick: TickIndex, tickSpan: number): TakeResult[];
 
     get width() {
         if (this.right.lt(this.left)) return 0;
@@ -52,15 +51,6 @@ export abstract class Range {
 }
 
 export class ReserveRange extends Range {
-    constructor(qty: number, left: TickIndex, right: TickIndex) {
-        if (left.gt(right))
-            panic(
-                `The range has invalid bounds [${left.index()}, ${right.index()}]`
-            );
-
-        super(qty, left, right);
-    }
-
     public clone() {
         return new ReserveRange(
             this.qty,
@@ -69,20 +59,13 @@ export class ReserveRange extends Range {
         );
     }
 
-    public override unpack(curTick: TickIndex, tickSpan: number): TakeResult[] {
-        const result: TakeResult[] = [];
+    constructor(qty: number, left: TickIndex, right: TickIndex) {
+        if (left.gt(right))
+            panic(
+                `The range has invalid bounds [${left.index()}, ${right.index()}]`
+            );
 
-        if (!this.isEmpty()) {
-            const q = this.qty / this.width;
-
-            for (const i = this.right.clone(); i.ge(this.left); i.dec()) {
-                if (i.distance(curTick) > tickSpan) break;
-
-                result.push({ qty: q, tickIdx: i.clone() });
-            }
-        }
-
-        return result;
+        super(qty, left, right);
     }
 
     public put(qty: number) {
@@ -150,16 +133,6 @@ export class ReserveRange extends Range {
         return { qty, tickIdx: tick };
     }
 
-    public stretchToRight(newRight: TickIndex) {
-        this.assertNonEmpty();
-
-        if (newRight.le(this.right))
-            panic(
-                `New right ${newRight.index()} should be bigger than old right ${this.right.index()}`
-            );
-
-        this.right = newRight.clone();
-    }
     public setLeft(newLeft: TickIndex) {
         this.assertNonEmpty();
 
@@ -174,24 +147,6 @@ export class ReserveRange extends Range {
             );
 
         this.left = newLeft.clone();
-    }
-
-    public setRight(newRight: TickIndex) {
-        this.assertNonEmpty();
-
-        if (newRight.lt(this.right)) {
-            panic(
-                `New right ${newRight.index()} should be bigger than old right ${this.right.index()}`
-            );
-        }
-
-        if (newRight.lt(this.left)) {
-            panic(
-                `New right ${newRight.index()} should be bigger than left ${this.left.index()}`
-            );
-        }
-
-        this.right = newRight.clone();
     }
 
     public getLeft(): TickIndex {
@@ -218,35 +173,17 @@ export class InventoryRange extends Range {
         );
     }
 
-    public override unpack(curTick: TickIndex, tickSpan: number): TakeResult[] {
-        const result: TakeResult[] = [];
-
-        if (!this.isEmpty()) {
-            let qty = this.bestTickQty();
-            const ratio = this.perTickPriceRatio();
-
-            for (const i = this.left.clone(); i.le(this.right); i.inc()) {
-                if (i.distance(curTick) > tickSpan) break;
-
-                result.push({ qty, tickIdx: i.clone() });
-
-                qty *= ratio;
-
-                if (i.eq(this.right)) break;
-            }
-        }
-
-        return result;
-    }
-
     // TODO: do with a formula
-    public calcRespectiveReserve() {
+    public calcRespectiveReserve(): number {
+        this.assertNonEmpty();
+
         let qty = this.bestTickQty();
         const ratio = this.perTickPriceRatio();
         let sum = 0;
 
         for (const i = this.left.clone(); i.le(this.right); i.inc()) {
-            sum += qty * tickToPrice(i, "inventory");
+            const respectiveValue = qty * tickToPrice(i, "inventory");
+            sum += respectiveValue;
             qty *= ratio;
 
             if (i.eq(this.right)) break;

@@ -41,7 +41,13 @@ export class Reserve {
     public withdrawCut(cut: number): number {
         this.assertInitted();
 
-        return this.range!.withdrawCut(cut);
+        const qtyOut = this.range!.withdrawCut(cut);
+
+        if (this.range!.isEmpty()) {
+            this.range = undefined;
+        }
+
+        return qtyOut;
     }
 
     public putUniform(qty: number) {
@@ -118,8 +124,8 @@ export class Reserve {
         return this.range !== undefined;
     }
 
-    public unpack(curTick: TickIndex, tickSpan: number): TakeResult[] {
-        return this.range?.unpack(curTick, tickSpan) ?? [];
+    public getRange(): ReserveRange | undefined {
+        return this.range?.clone();
     }
 
     private assertInitted() {
@@ -176,9 +182,14 @@ export class Inventory {
             this.ranges.pop();
         }
 
-        this.allocatedQty -= result.qty;
-        this._respectiveReserve -=
-            result.qty * tickToPrice(result.tickIdx, "inventory");
+        if (this.ranges.length === 0) {
+            this._respectiveReserve = 0;
+            this.allocatedQty = 0;
+        } else {
+            this._respectiveReserve -=
+                result.qty * tickToPrice(result.tickIdx, "inventory");
+            this.allocatedQty -= result.qty;
+        }
 
         return {
             inventory: result.qty,
@@ -209,8 +220,9 @@ export class Inventory {
             }
         }
 
-        this._respectiveReserve +=
+        const respectiveValue =
             tick.inventory * tickToPrice(tick.idx, "inventory");
+        this._respectiveReserve += respectiveValue;
         this.allocatedQty += tick.inventory;
 
         const range = new InventoryRange(
@@ -242,9 +254,14 @@ export class Inventory {
             this.ranges.shift();
         }
 
-        this.allocatedQty -= result.qty;
-        this._respectiveReserve -=
-            result.qty * tickToPrice(result.tickIdx, "inventory");
+        if (this.ranges.length === 0) {
+            this._respectiveReserve = 0;
+            this.allocatedQty = 0;
+        } else {
+            this._respectiveReserve -=
+                result.qty * tickToPrice(result.tickIdx, "inventory");
+            this.allocatedQty -= result.qty;
+        }
 
         return {
             inventory: result.qty,
@@ -276,8 +293,9 @@ export class Inventory {
             }
         }
 
-        this._respectiveReserve +=
+        const respectiveValue =
             tick.inventory * tickToPrice(tick.idx, "inventory");
+        this._respectiveReserve += respectiveValue;
         this.allocatedQty += tick.inventory;
 
         if (this.shouldSpawnNew) {
@@ -315,14 +333,8 @@ export class Inventory {
         return this.ranges.length === 0;
     }
 
-    public unpack(curTick: TickIndex, tickSpan: number): TakeResult[] {
-        const result: TakeResult[] = [];
-
-        for (const range of this.ranges) {
-            result.push(...range.unpack(curTick, tickSpan));
-        }
-
-        return result;
+    public getRanges() {
+        return this.ranges.map((it) => it.clone());
     }
 
     private assertNotEmpty() {

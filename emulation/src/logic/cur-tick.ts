@@ -30,6 +30,14 @@ export class CurrentTick {
 
     private recoveryBin: RecoveryBin;
 
+    constructor(
+        private name: string,
+        private idx: TickIndex,
+        private liquidity: Liquidity
+    ) {
+        this.recoveryBin = new RecoveryBin(name, liquidity);
+    }
+
     public clone(newLiquidity: Liquidity) {
         const c = new CurrentTick(this.name, this.idx.clone(), newLiquidity);
 
@@ -56,11 +64,27 @@ export class CurrentTick {
     public swap(args: CurrentTickSwapArgs): CurrentTickSwapResult {
         if (args.direction === "reserve -> inventory") {
             // first try to recover as much IL as possible
-            const { inventoryOut, reminderReserveIn, recoveredReserve } =
-                this.recoveryBin.recover({
+            let inventoryOut = 0,
+                reminderReserveIn = args.qtyIn,
+                recoveredReserve = 0;
+
+            // recover until exhausted
+            while (true) {
+                const {
+                    inventoryOut: io,
+                    reminderReserveIn: ri,
+                    recoveredReserve: rr,
+                } = this.recoveryBin.recover({
                     curTickIdx: this.idx.clone(),
-                    reserveIn: args.qtyIn,
+                    reserveIn: reminderReserveIn,
                 });
+
+                if (rr === 0) break;
+
+                inventoryOut += io;
+                reminderReserveIn = ri;
+                recoveredReserve += rr;
+            }
 
             if (almostEq(reminderReserveIn, 0)) {
                 return {
@@ -265,14 +289,6 @@ export class CurrentTick {
     public getRecoveryBin() {
         return this.recoveryBin;
     }
-
-    constructor(
-        private name: string,
-        private idx: TickIndex,
-        private liquidity: Liquidity
-    ) {
-        this.recoveryBin = new RecoveryBin(name, liquidity);
-    }
 }
 
 export type RecoverArgs = {
@@ -292,6 +308,8 @@ export type RecoverResult = {
 export class RecoveryBin {
     private collateral: number = 0;
     private worstTick: InventoryTick | undefined = undefined;
+
+    constructor(private name: string, private liquidity: Liquidity) {}
 
     public clone(newLiquidity: Liquidity) {
         const r = new RecoveryBin(this.name, newLiquidity);
@@ -334,19 +352,31 @@ export class RecoveryBin {
     public recover(args: RecoverArgs): RecoverResult {
         const inventory = this.liquidity.getInventory();
 
-        if (!this.worstTick) {
-            this.worstTick = inventory.takeRight();
-            if (!this.worstTick)
-                return {
-                    inventoryOut: 0,
-                    reminderReserveIn: args.reserveIn,
-                    recoveredReserve: 0,
-                };
-        }
+        if (almostEq(this.collateral, 0))
+            return {
+                inventoryOut: 0,
+                recoveredReserve: 0,
+                reminderReserveIn: args.reserveIn,
+            };
 
-        // guarantees no division by zero
+        this.worstTick = inventory.takeRight();
+        if (!this.worstTick)
+            return {
+                inventoryOut: 0,
+                recoveredReserve: 0,
+                reminderReserveIn: args.reserveIn,
+            };
+
+        // guarantees no division by zero below
         if (this.worstTick.idx.eq(args.curTickIdx)) {
-            panic("Impossible to fix worst tick when it is current tick");
+            this.liquidity.getInventory().putRightNewRange(this.worstTick);
+            this.worstTick = undefined;
+
+            return {
+                inventoryOut: 0,
+                recoveredReserve: 0,
+                reminderReserveIn: args.reserveIn,
+            };
         }
 
         // Raw prices for ratio calculations
@@ -355,7 +385,8 @@ export class RecoveryBin {
         const I = this.worstTick.inventory;
         const X = this.collateral;
 
-        const dI = Math.min(I, (X * p1) / Math.abs(p1 - p0));
+        const maxdI = (X * p1) / Math.abs(p1 - p0);
+        const dI = Math.min(I, maxdI);
 
         const hasInventory = this.collateral + dI;
         const needsInventory =
@@ -385,8 +416,10 @@ export class RecoveryBin {
         const takeReserve =
             takeInventory * tickToPrice(args.curTickIdx, "inventory");
 
-        this.collateral = 0;
         this.worstTick.inventory -= dI;
+
+        const dICut = dI / maxdI;
+        this.collateral *= 1 - dICut;
 
         if (almostEq(this.worstTick.inventory, 0)) {
             this.worstTick = undefined;
@@ -417,6 +450,4 @@ export class RecoveryBin {
     public getCollateral(): number {
         return this.collateral;
     }
-
-    constructor(private name: string, private liquidity: Liquidity) {}
 }

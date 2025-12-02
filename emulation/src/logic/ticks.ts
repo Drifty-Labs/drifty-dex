@@ -17,6 +17,10 @@ export class TickIndexFactory {
 }
 
 export class TickIndex {
+    constructor(private isBase: boolean, private idx: number) {
+        this.assertInRange();
+    }
+
     public clone(invert?: boolean): TickIndex {
         const newInverted = invert ? !this.isBase : this.isBase;
         const abs = this.toAbsolute();
@@ -112,10 +116,6 @@ export class TickIndex {
 
     public isBaseTick(): boolean {
         return this.isBase;
-    }
-
-    constructor(private isBase: boolean, private idx: number) {
-        this.assertInRange();
     }
 
     private assertSameOrientation(other: TickIndex) {
