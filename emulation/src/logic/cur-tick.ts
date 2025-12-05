@@ -1,4 +1,5 @@
 import {
+    Inventory,
     type InventoryTick,
     Liquidity,
     type ReserveTick,
@@ -31,20 +32,28 @@ export class CurrentTick {
 
     constructor(
         private side: Side,
+        private isDrifting: boolean,
         private idx: number,
-        private liquidity: Liquidity
+        private liquidity: Liquidity,
+        private noLogs: boolean
     ) {
-        this.recoveryBin = new RecoveryBin(side, liquidity);
+        this.recoveryBin = new RecoveryBin(side, liquidity, noLogs, isDrifting);
     }
 
-    public clone(newLiquidity: Liquidity) {
-        const c = new CurrentTick(this.side, this.idx, newLiquidity);
+    public clone(newLiquidity: Liquidity, noLogs: boolean) {
+        const c = new CurrentTick(
+            this.side,
+            this.isDrifting,
+            this.idx,
+            newLiquidity,
+            noLogs
+        );
 
         c.targetReserve = this.targetReserve;
         c.currentReserve = this.currentReserve;
         c.targetInventory = this.targetInventory;
         c.currentInventory = this.currentInventory;
-        c.recoveryBin = this.recoveryBin.clone(newLiquidity);
+        c.recoveryBin = this.recoveryBin.clone(newLiquidity, noLogs);
 
         return c;
     }
@@ -109,9 +118,7 @@ export class CurrentTick {
             // if we consume the tick only partially, leave early
             if (needsInventory < this.currentInventory) {
                 this.currentInventory -= needsInventory;
-                // Add to reserve
-                const recoveredReserve = reminderReserveIn;
-                this.currentReserve += recoveredReserve;
+                this.currentReserve += reminderReserveIn;
 
                 return {
                     qtyOut: needsInventory,
@@ -185,15 +192,13 @@ export class CurrentTick {
             );
         }
 
-        const inventoryTick: InventoryTick | undefined = almostEq(
-            this.targetInventory,
-            0
-        )
-            ? undefined
-            : {
-                  idx: this.idx,
-                  inventory: this.currentInventory,
-              };
+        const inventoryTick: InventoryTick | undefined =
+            this.currentInventory === 0
+                ? undefined
+                : {
+                      idx: this.idx,
+                      inventory: this.currentInventory,
+                  };
 
         this.cleanup();
 
@@ -215,12 +220,10 @@ export class CurrentTick {
             );
         }
 
-        const reserveTick: ReserveTick | undefined = almostEq(
-            this.targetReserve,
-            0
-        )
-            ? undefined
-            : { idx: this.idx, reserve: this.currentReserve };
+        const reserveTick: ReserveTick | undefined =
+            this.currentReserve === 0
+                ? undefined
+                : { idx: this.idx, reserve: this.currentReserve };
 
         this.cleanup();
 
@@ -236,15 +239,6 @@ export class CurrentTick {
         );
 
         if (inventoryTick) this.putInventoryTick(inventoryTick);
-    }
-
-    public deposit(reserve: number) {
-        this.targetReserve += reserve;
-        this.currentReserve += reserve;
-
-        this.targetInventory =
-            this.targetReserve *
-            absoluteTickToPrice(this.idx, this.side, "reserve");
     }
 
     public withdrawCut(cut: number): WithdrawResult {
@@ -285,7 +279,8 @@ export class CurrentTick {
     }
 
     private putInventoryTick(tick: InventoryTick) {
-        if (tick.idx !== this.idx) panic("Ticks don't match");
+        if (tick.idx !== this.idx)
+            panic(`Ticks don't match: old=${this.idx}, new=${tick.idx}`);
 
         this.targetInventory += tick.inventory;
         this.currentInventory += tick.inventory;
@@ -296,7 +291,8 @@ export class CurrentTick {
     }
 
     private putReserveTick(tick: ReserveTick) {
-        if (tick.idx !== this.idx) panic("Ticks don't match");
+        if (tick.idx !== this.idx)
+            panic(`Ticks don't match: old=${this.idx} new=${tick.idx}`);
 
         this.targetReserve += tick.reserve;
         this.currentReserve += tick.reserve;
@@ -308,6 +304,14 @@ export class CurrentTick {
 
     public getRecoveryBin() {
         return this.recoveryBin;
+    }
+
+    public get reserve() {
+        return this.currentReserve;
+    }
+
+    public get Inventory() {
+        return this.currentInventory;
     }
 }
 
@@ -329,10 +333,20 @@ export class RecoveryBin {
     private _collateral: number = 0;
     private _worstTick: InventoryTick | undefined = undefined;
 
-    constructor(private side: Side, private liquidity: Liquidity) {}
+    constructor(
+        private side: Side,
+        private liquidity: Liquidity,
+        private noLogs: boolean,
+        private isDrifting: boolean
+    ) {}
 
-    public clone(newLiquidity: Liquidity) {
-        const r = new RecoveryBin(this.side, newLiquidity);
+    public clone(newLiquidity: Liquidity, noLogs: boolean) {
+        const r = new RecoveryBin(
+            this.side,
+            newLiquidity,
+            noLogs,
+            this.isDrifting
+        );
 
         r._collateral = this._collateral;
         r._worstTick = this._worstTick
@@ -358,12 +372,6 @@ export class RecoveryBin {
 
     /**
      * Uses collateral + the worst inventory tick to offset fresh reserve inflow.
-     *
-     * - If no worst tick is cached, it pops one from {@link Inventory.takeRight}.
-     * - If the current price equals the worst tick and there is no collateral,
-     *   the tick is returned untouched—the outer swap will sell it normally.
-     * - Otherwise it applies `dI = min(I, X*P1 / |P1-P0|)` to determine how
-     *   much inventory can be safely recovered right now.
      */
     public recover(args: RecoverArgs): RecoverResult {
         const inventory = this.liquidity.inventory;
@@ -375,18 +383,44 @@ export class RecoveryBin {
                 reminderReserveIn: args.reserveIn,
             };
 
-        try {
-            this._worstTick = inventory.takeWorst();
+        this._worstTick = inventory.takeWorst();
 
-            if (!this._worstTick)
+        if (!this._worstTick) {
+            if (almostEq(this.collateral, 0))
                 return {
                     inventoryOut: 0,
                     recoveredReserve: 0,
                     reminderReserveIn: args.reserveIn,
                 };
-        } catch (e) {
-            console.error(this.liquidity.clone());
-            throw e;
+
+            const reserveForCollateral =
+                this.collateral *
+                absoluteTickToPrice(args.curTickIdx, this.side, "inventory");
+
+            if (args.reserveIn >= reserveForCollateral) {
+                const inventoryOut = this.collateral;
+                const recoveredReserve = reserveForCollateral;
+                const reminderIn = args.reserveIn - reserveForCollateral;
+
+                this._collateral = 0;
+                return {
+                    inventoryOut,
+                    recoveredReserve,
+                    reminderReserveIn: reminderIn,
+                };
+            }
+
+            const usedShare = args.reserveIn / reserveForCollateral;
+            const inventoryOut = this.collateral * usedShare;
+            const recoveredReserve = reserveForCollateral * usedShare;
+
+            this._collateral -= inventoryOut;
+
+            return {
+                inventoryOut,
+                recoveredReserve,
+                reminderReserveIn: 0,
+            };
         }
 
         // guarantees no division by zero below
@@ -401,66 +435,80 @@ export class RecoveryBin {
             };
         }
 
-        // Raw prices for ratio calculations
-        const p0 = absoluteTickToPrice(
-            this._worstTick.idx,
-            this.side,
-            "reserve"
-        );
-        const p1 = absoluteTickToPrice(args.curTickIdx, this.side, "reserve");
-        const I = this._worstTick.inventory;
-        const X = this._collateral;
+        const worstTickRespectiveReserve =
+            this._worstTick.inventory *
+            absoluteTickToPrice(this._worstTick.idx, this.side, "inventory");
 
-        const maxdI = (X * p1) / Math.abs(p1 - p0);
-        const dI = Math.min(I, maxdI);
+        if (args.reserveIn >= worstTickRespectiveReserve) {
+            const curTickProducedInventory =
+                worstTickRespectiveReserve *
+                absoluteTickToPrice(args.curTickIdx, this.side, "reserve");
 
-        const hasInventory = this._collateral + dI;
-        const needsInventory =
-            args.reserveIn *
-            absoluteTickToPrice(args.curTickIdx, this.side, "reserve");
+            if (curTickProducedInventory < this._worstTick.inventory)
+                panic(
+                    "Should always require more inventory to recover the tick"
+                );
+            const missingInventoryToBreakEven =
+                curTickProducedInventory - this._worstTick.inventory;
 
-        if (hasInventory > needsInventory) {
-            const leftoverInventory = hasInventory - needsInventory;
-            const leftoverCut = leftoverInventory / hasInventory;
+            // if we have enough
+            if (this._collateral >= missingInventoryToBreakEven) {
+                this._collateral -= missingInventoryToBreakEven;
+                this._worstTick = undefined;
 
-            this._collateral *= leftoverCut;
-            const leftoverWorstTick = dI * leftoverCut;
+                const recoveredReserve = worstTickRespectiveReserve;
+                const inventoryOut = curTickProducedInventory;
+                const reminderIn = args.reserveIn - recoveredReserve;
 
-            this._worstTick.inventory =
-                this._worstTick.inventory - dI + leftoverWorstTick;
+                return {
+                    recoveredReserve,
+                    inventoryOut,
+                    reminderReserveIn: reminderIn,
+                };
+            }
 
+            const recoveredShare =
+                this._collateral / missingInventoryToBreakEven;
+            const inventoryOut =
+                this.collateral + this._worstTick.inventory * recoveredShare;
+
+            this._collateral = 0;
+            this._worstTick.inventory *= 1 - recoveredShare;
             this.liquidity.inventory.putWorstNewRange(this._worstTick);
             this._worstTick = undefined;
 
+            const recoveredReserve =
+                inventoryOut *
+                absoluteTickToPrice(args.curTickIdx, this.side, "inventory");
+            const reminderIn = args.reserveIn - recoveredReserve;
+
             return {
-                inventoryOut: needsInventory,
-                reminderReserveIn: 0,
-                recoveredReserve: args.reserveIn,
+                recoveredReserve,
+                inventoryOut,
+                reminderReserveIn: reminderIn,
             };
         }
 
-        const takeInventory = hasInventory;
-        const takeReserve =
-            takeInventory *
-            absoluteTickToPrice(args.curTickIdx, this.side, "inventory");
+        const recoveredShare = args.reserveIn / worstTickRespectiveReserve;
+        const recoveredReserve = args.reserveIn;
+        const inventoryOut =
+            recoveredReserve *
+            absoluteTickToPrice(args.curTickIdx, this.side, "reserve");
 
-        this._worstTick.inventory -= dI;
-
-        const dICut = dI / maxdI;
-        this._collateral *= 1 - dICut;
-
-        if (almostEq(this._worstTick.inventory, 0)) {
-            this._worstTick = undefined;
-        } else {
-            this.liquidity.inventory.putWorstNewRange(this._worstTick);
-            this._worstTick = undefined;
-        }
+        this._collateral *= recoveredShare;
+        this._worstTick.inventory *= recoveredShare;
+        this.liquidity.inventory.putWorstNewRange(this._worstTick);
+        this._worstTick = undefined;
 
         return {
-            inventoryOut: takeInventory,
-            reminderReserveIn: args.reserveIn - takeReserve,
-            recoveredReserve: takeReserve,
+            recoveredReserve,
+            inventoryOut,
+            reminderReserveIn: 0,
         };
+    }
+
+    public isBase() {
+        return this.side === "base";
     }
 
     public unsetWorstTick() {
@@ -473,10 +521,6 @@ export class RecoveryBin {
 
     public hasCollateral(): boolean {
         return this._collateral > 0;
-    }
-
-    public get worstTick(): InventoryTick | undefined {
-        return this._worstTick;
     }
 
     public get collateral(): number {

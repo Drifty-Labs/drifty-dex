@@ -30,11 +30,15 @@ export type ReserveTick = {
 export class Reserve {
     private range: ReserveRange | undefined = undefined;
 
-    constructor(private _side: Side) {}
+    constructor(
+        private _side: Side,
+        private noLogs: boolean,
+        private isDrifting: boolean
+    ) {}
 
-    public clone() {
-        const r = new Reserve(this.side);
-        r.range = this.range?.clone();
+    public clone(noLogs: boolean) {
+        const r = new Reserve(this.side, noLogs, this.isDrifting);
+        r.range = this.range?.clone(noLogs);
 
         return r;
     }
@@ -42,7 +46,14 @@ export class Reserve {
     public init(qty: number, left: number, right: number) {
         this.assertNotInitted();
 
-        this.range = new ReserveRange(qty, left, right, this.side);
+        this.range = new ReserveRange(
+            qty,
+            left,
+            right,
+            this.side,
+            this.noLogs,
+            this.isDrifting
+        );
     }
 
     public withdrawCut(cut: number): number {
@@ -136,7 +147,7 @@ export class Reserve {
     }
 
     public getRange(): ReserveRange | undefined {
-        return this.range?.clone();
+        return this.range?.clone(this.noLogs);
     }
 
     private assertInitted() {
@@ -161,15 +172,19 @@ export class Inventory {
     private shouldSpawnNew: boolean = true;
     private ranges: InventoryRange[] = [];
 
-    constructor(private _side: Side) {}
+    constructor(
+        private _side: Side,
+        private noLogs: boolean,
+        private isDrifting: boolean
+    ) {}
 
-    public clone() {
-        const i = new Inventory(this._side);
+    public clone(noLogs: boolean) {
+        const i = new Inventory(this._side, noLogs, this.isDrifting);
 
         i._respectiveReserve = this._respectiveReserve;
         i.allocatedQty = this.allocatedQty;
         i.shouldSpawnNew = this.shouldSpawnNew;
-        i.ranges = this.ranges.map((it) => it.clone());
+        i.ranges = this.ranges.map((it) => it.clone(noLogs));
 
         return i;
     }
@@ -177,7 +192,14 @@ export class Inventory {
     public init(qty: number, left: number, right: number) {
         if (this.ranges.length > 0) panic("Can only init inventory once");
 
-        const range = new InventoryRange(qty, left, right, this.side);
+        const range = new InventoryRange(
+            qty,
+            left,
+            right,
+            this.side,
+            this.noLogs,
+            this.isDrifting
+        );
         this.ranges.push(range);
         this.allocatedQty = qty;
         this._respectiveReserve = range.calcRespectiveReserve();
@@ -203,9 +225,10 @@ export class Inventory {
             this._respectiveReserve = 0;
             this.allocatedQty = 0;
         } else {
-            this._respectiveReserve -=
-                result.qty *
-                absoluteTickToPrice(result.tickIdx, this.side, "inventory");
+            this._respectiveReserve = this.ranges.reduce(
+                (prev, cur) => prev + cur.calcRespectiveReserve(),
+                0
+            );
             this.allocatedQty -= result.qty;
         }
 
@@ -241,7 +264,9 @@ export class Inventory {
             tick.inventory,
             tick.idx,
             tick.idx,
-            this.side
+            this.side,
+            this.noLogs,
+            this.isDrifting
         );
 
         if (this.isBase()) {
@@ -277,9 +302,10 @@ export class Inventory {
             this._respectiveReserve = 0;
             this.allocatedQty = 0;
         } else {
-            this._respectiveReserve -=
-                result.qty *
-                absoluteTickToPrice(result.tickIdx, this.side, "inventory");
+            this._respectiveReserve = this.ranges.reduce(
+                (prev, cur) => prev + cur.calcRespectiveReserve(),
+                0
+            );
             this.allocatedQty -= result.qty;
         }
 
@@ -315,7 +341,9 @@ export class Inventory {
                 tick.inventory,
                 tick.idx,
                 tick.idx,
-                this.side
+                this.side,
+                this.noLogs,
+                this.isDrifting
             );
 
             this.shouldSpawnNew = false;
@@ -362,7 +390,7 @@ export class Inventory {
     }
 
     public getRanges() {
-        return this.ranges.map((it) => it.clone());
+        return this.ranges.map((it) => it.clone(this.noLogs));
     }
 
     private assertNotEmpty() {
@@ -374,16 +402,20 @@ export class Liquidity {
     private _reserve: Reserve;
     private _inventory: Inventory;
 
-    constructor(private _side: Side) {
-        this._reserve = new Reserve(_side);
-        this._inventory = new Inventory(_side);
+    constructor(
+        private _side: Side,
+        private noLogs: boolean,
+        private isDrifting: boolean
+    ) {
+        this._reserve = new Reserve(_side, noLogs, isDrifting);
+        this._inventory = new Inventory(_side, noLogs, isDrifting);
     }
 
-    public clone() {
-        const l = new Liquidity(this._side);
+    public clone(noLogs: boolean) {
+        const l = new Liquidity(this._side, noLogs, this.isDrifting);
 
-        l._reserve = this._reserve.clone();
-        l._inventory = this._inventory.clone();
+        l._reserve = this._reserve.clone(noLogs);
+        l._inventory = this._inventory.clone(noLogs);
 
         return l;
     }

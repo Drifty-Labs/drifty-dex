@@ -24,18 +24,19 @@ export function LiquidityChart(props: LiquidityChartProps) {
     const ranges = createMemo(() => flattenRanges(props.liquidity));
 
     const maxHeight = createMemo(() => {
+        const r = ranges();
         let maxInvHeight = 0;
 
-        for (const { height } of ranges().base.oppositeInventory) {
-            const newHeight = height + (ranges().base.reserve?.height ?? 0);
+        for (const { height } of r.base.oppositeInventory) {
+            const newHeight = height + (r.base.reserve?.height ?? 0);
 
             if (newHeight > maxInvHeight) {
                 maxInvHeight = newHeight;
             }
         }
 
-        for (const { height } of ranges().quote.oppositeInventory) {
-            const newHeight = height + (ranges().quote.reserve?.height ?? 0);
+        for (const { height } of r.quote.oppositeInventory) {
+            const newHeight = height + (r.quote.reserve?.height ?? 0);
 
             if (newHeight > maxInvHeight) {
                 maxInvHeight = newHeight;
@@ -48,33 +49,41 @@ export function LiquidityChart(props: LiquidityChartProps) {
     const curTickWidth = () => 20;
 
     const baseWidth = () => {
+        const r = ranges();
+
         const baseLeft = props.liquidity.currentTick.idx + 1;
         const baseRight =
-            ranges().base.reserve?.right ??
-            ranges().base.oppositeInventory.length > 0
-                ? ranges().base.oppositeInventory[
-                      ranges().base.oppositeInventory.length - 1
-                  ].right
-                : undefined;
+            r.base.reserve?.right ??
+            (r.base.oppositeInventory.length > 0
+                ? r.base.oppositeInventory[r.base.oppositeInventory.length - 1]
+                      .right
+                : undefined);
 
         return baseRight === undefined ? 0 : baseRight - baseLeft + 1;
     };
 
     const quoteWidth = () => {
+        const r = ranges();
+
         const quoteLeft =
-            ranges().quote.reserve?.left ??
-            ranges().quote.oppositeInventory.length > 0
-                ? ranges().quote.oppositeInventory[0].left
-                : undefined;
+            r.quote.reserve?.left ??
+            (r.quote.oppositeInventory.length > 0
+                ? r.quote.oppositeInventory[0].left
+                : undefined);
+
         const quoteRight = props.liquidity.currentTick.idx - 1;
 
         return quoteLeft === undefined ? 0 : quoteRight - quoteLeft + 1;
     };
 
     const horizontalSqueezeFactor = () => {
-        const freeContainerWidth = props.containerWidth - curTickWidth();
+        const ctw = curTickWidth();
+        const bw = baseWidth();
+        const qw = quoteWidth();
 
-        return freeContainerWidth / (baseWidth() + quoteWidth());
+        const freeContainerWidth = props.containerWidth - ctw;
+
+        return freeContainerWidth / (bw + qw);
     };
 
     const verticalSqueezeFactor = () => {
@@ -82,13 +91,16 @@ export function LiquidityChart(props: LiquidityChartProps) {
     };
 
     const base = () => {
-        const res = ranges().base.reserve;
-        const inv = ranges().base.oppositeInventory;
+        const r = ranges();
+        const res = r.base.reserve;
+        const inv = r.base.oppositeInventory;
 
         if (!res && inv.length === 0) return <div class="relative empty"></div>;
 
         const hf = horizontalSqueezeFactor();
         const vf = verticalSqueezeFactor();
+
+        const bw = baseWidth();
 
         const leftOffset = props.liquidity.currentTick.idx;
 
@@ -96,7 +108,7 @@ export function LiquidityChart(props: LiquidityChartProps) {
             <div
                 class="relative"
                 style={{
-                    width: `${baseWidth() * horizontalSqueezeFactor()}px`,
+                    width: `${bw * hf}px`,
                     height: props.containerHeight + "px",
                 }}
             >
@@ -137,13 +149,15 @@ export function LiquidityChart(props: LiquidityChartProps) {
     };
 
     const quote = () => {
-        const res = ranges().quote.reserve;
-        const inv = ranges().quote.oppositeInventory;
+        const r = ranges();
+        const res = r.quote.reserve;
+        const inv = r.quote.oppositeInventory;
 
         if (!res && inv.length === 0) return <div class="relative empty"></div>;
 
         const hf = horizontalSqueezeFactor();
         const vf = verticalSqueezeFactor();
+        const qw = quoteWidth();
 
         const rightOffset = props.liquidity.currentTick.idx;
 
@@ -151,27 +165,34 @@ export function LiquidityChart(props: LiquidityChartProps) {
             <div
                 class="relative"
                 style={{
-                    width: `${quoteWidth() * horizontalSqueezeFactor()}px`,
+                    width: `${qw * hf}px`,
                     height: props.containerHeight + "px",
                 }}
             >
                 <Show when={inv.length > 0}>
                     <For each={inv}>
-                        {(it) => (
-                            <div
-                                class="absolute cursor-pointer bg-green opacity-50 hover:opacity-100"
-                                style={{
-                                    right: (rightOffset - it.right) * hf + "px",
-                                    bottom: (res?.height ?? 0) * vf + "px",
-                                    width: (it.right - it.left + 1) * hf + "px",
-                                    height: it.height * vf + "px",
-                                    "background-image":
-                                        "radial-gradient(black 1px, transparent 1px)",
-                                    "background-size": "3px 3px",
-                                }}
-                                onclick={() => console.log(it)}
-                            ></div>
-                        )}
+                        {(it) => {
+                            const width = (it.right - it.left + 1) * hf;
+                            const height = it.height * vf;
+                            const right = (rightOffset - it.right) * hf;
+                            const bottom = (res?.height ?? 0) * vf;
+
+                            return (
+                                <div
+                                    class="absolute cursor-pointer bg-green opacity-50 hover:opacity-100"
+                                    style={{
+                                        right: right + "px",
+                                        bottom: bottom + "px",
+                                        width: width + "px",
+                                        height: height + "px",
+                                        "background-image":
+                                            "radial-gradient(black 1px, transparent 1px)",
+                                        "background-size": "3px 3px",
+                                    }}
+                                    onclick={() => console.log(it)}
+                                ></div>
+                            );
+                        }}
                     </For>
                 </Show>
 
@@ -191,6 +212,33 @@ export function LiquidityChart(props: LiquidityChartProps) {
         );
     };
 
+    const leftPrice = () => {
+        const r = ranges();
+        const leftTick =
+            r.quote.reserve?.left ??
+            (r.quote.oppositeInventory.length > 0
+                ? r.quote.oppositeInventory[0].left
+                : undefined);
+
+        return leftTick !== undefined
+            ? absoluteTickToPrice(leftTick, "base", "reserve")
+            : undefined;
+    };
+
+    const rightPrice = () => {
+        const r = ranges();
+        const rightTick =
+            r.base.reserve?.right ??
+            (r.base.oppositeInventory.length > 0
+                ? r.base.oppositeInventory[r.base.oppositeInventory.length - 1]
+                      .right
+                : undefined);
+
+        return rightTick !== undefined
+            ? absoluteTickToPrice(rightTick, "base", "reserve")
+            : undefined;
+    };
+
     return (
         <div
             class="flex flex-row"
@@ -199,14 +247,28 @@ export function LiquidityChart(props: LiquidityChartProps) {
                 height: props.containerHeight + "px",
             }}
         >
-            {quote()}
+            <div class="relative">
+                {quote()}
+                <Show when={leftPrice() !== undefined}>
+                    <p class="absolute left-0 bottom-[-2em]">
+                        {(leftPrice() ?? 0).toFixed(2)}
+                    </p>
+                </Show>
+            </div>
             <CurTick
                 widthPx={curTickWidth()}
                 base={props.liquidity.currentTick.base}
                 quote={props.liquidity.currentTick.quote}
                 idx={props.liquidity.currentTick.idx}
             />
-            {base()}
+            <div class="relative">
+                {base()}
+                <Show when={rightPrice() !== undefined}>
+                    <p class="absolute right-0 bottom-[-2em]">
+                        {(rightPrice() ?? 0).toFixed(2)}
+                    </p>
+                </Show>
+            </div>
         </div>
     );
 }
@@ -252,36 +314,6 @@ function flattenRanges(
             }),
         },
     };
-
-    if (ranges.base.reserve && ranges.base.oppositeInventory.length > 0) {
-        const isValid =
-            ranges.base.reserve.right ===
-            ranges.base.oppositeInventory[
-                ranges.base.oppositeInventory.length - 1
-            ].right;
-
-        if (!isValid) {
-            console.error(
-                `Invalid base ranges: should overlap 100%`,
-                ranges.base.reserve,
-                ranges.base.oppositeInventory
-            );
-        }
-    }
-
-    if (ranges.quote.reserve && ranges.quote.oppositeInventory.length > 0) {
-        const isValid =
-            ranges.quote.reserve.left ===
-            ranges.quote.oppositeInventory[0].left;
-
-        if (!isValid) {
-            console.error(
-                `Invalid quote ranges: should overlap 100%`,
-                ranges.quote.reserve,
-                ranges.quote.oppositeInventory
-            );
-        }
-    }
 
     return ranges;
 }
