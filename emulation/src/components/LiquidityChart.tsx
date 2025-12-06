@@ -221,7 +221,7 @@ export function LiquidityChart(props: LiquidityChartProps) {
                 : undefined);
 
         return leftTick !== undefined
-            ? absoluteTickToPrice(leftTick, "base", "reserve")
+            ? absoluteTickToPrice(leftTick, "base", "reserve").toNumber()
             : undefined;
     };
 
@@ -235,7 +235,7 @@ export function LiquidityChart(props: LiquidityChartProps) {
                 : undefined);
 
         return rightTick !== undefined
-            ? absoluteTickToPrice(rightTick, "base", "reserve")
+            ? absoluteTickToPrice(rightTick, "base", "reserve").toNumber()
             : undefined;
     };
 
@@ -257,8 +257,8 @@ export function LiquidityChart(props: LiquidityChartProps) {
             </div>
             <CurTick
                 widthPx={curTickWidth()}
-                base={props.liquidity.currentTick.base}
-                quote={props.liquidity.currentTick.quote}
+                base={props.liquidity.currentTick.base.toNumber()}
+                quote={props.liquidity.currentTick.quote.toNumber()}
                 idx={props.liquidity.currentTick.idx}
             />
             <div class="relative">
@@ -282,12 +282,12 @@ function flattenRanges(
                 const r = liquidity.base.reserve;
                 if (!r) return undefined;
 
-                const height = r.qty / r.width;
+                const height = r.qty.toNumber() / r.width;
 
                 return { left: r.left, right: r.right, height };
             })(),
             oppositeInventory: liquidity.quote.inventory.map((it) => {
-                const height = it.qty / it.width;
+                const height = it.qty.toNumber() / it.width;
 
                 return { left: it.left, right: it.right, height };
             }),
@@ -298,16 +298,18 @@ function flattenRanges(
                 if (!r) return undefined;
 
                 const avgTick = (r.left + r.right) / 2;
-                const qty =
-                    r.qty * absoluteTickToPrice(avgTick, "quote", "reserve");
+                const qty = r.qty
+                    .mul(absoluteTickToPrice(avgTick, "quote", "reserve"))
+                    .toNumber();
                 const height = qty / r.width;
 
                 return { left: r.left, right: r.right, height };
             })(),
             oppositeInventory: liquidity.base.inventory.map((it) => {
                 const avgTick = (it.left + it.right) / 2;
-                const qty =
-                    it.qty * absoluteTickToPrice(avgTick, "quote", "reserve");
+                const qty = it.qty
+                    .mul(absoluteTickToPrice(avgTick, "quote", "reserve"))
+                    .toNumber();
                 const height = qty / it.width;
 
                 return { left: it.left, right: it.right, height };

@@ -1,29 +1,31 @@
+import { E8s } from "./ecs.ts";
+
 /** The minimum possible tick index. */
 export const MIN_TICK = -887272;
 /** The maximum possible tick index. */
 export const MAX_TICK = 887272;
 
 /** The base price used for calculating tick prices. */
-export const BASE_PRICE = 1.0001;
-export const QUOTE_PRICE = Math.pow(BASE_PRICE, -1);
+export const BASE_PRICE = new E8s(1_0001_0000n);
+export const QUOTE_PRICE = BASE_PRICE.inv();
 
 export function priceToTick(price: number) {
-    return Math.floor(Math.log(price) / Math.log(BASE_PRICE));
+    return Math.floor(Math.log(price) / Math.log(BASE_PRICE.toNumber()));
 }
 
 export function absoluteTickToPrice(
     absoluteTick: number,
     side: Side,
     kind: "reserve" | "inventory"
-): number {
+): E8s {
     if (side === "base") {
         return kind === "reserve"
-            ? Math.pow(BASE_PRICE, absoluteTick)
-            : Math.pow(QUOTE_PRICE, absoluteTick);
+            ? BASE_PRICE.pow(absoluteTick)
+            : QUOTE_PRICE.pow(absoluteTick);
     } else {
         return kind === "reserve"
-            ? Math.pow(QUOTE_PRICE, absoluteTick)
-            : Math.pow(BASE_PRICE, absoluteTick);
+            ? QUOTE_PRICE.pow(absoluteTick)
+            : BASE_PRICE.pow(absoluteTick);
     }
 }
 
@@ -65,48 +67,6 @@ export function panic(msg?: string): never {
     throw new Error(`Panicked: ${msg}`);
 }
 
-export function almostEq(
-    a: number,
-    b: number,
-    eps: number = 0.00000001
-): boolean {
-    return Math.abs(a - b) < eps;
-}
-
 export function delay(ms: number) {
     return new Promise((res) => setTimeout(res, ms));
-}
-
-const T = 1_000_000_000_000;
-const B = 1_000_000_000;
-const M = 1_000_000;
-const K = 1_000;
-
-export function tokensToStr(qty: number): string {
-    const absQty = Math.abs(qty);
-    const sign = qty / absQty;
-    const whole = Math.floor(absQty);
-    const fraction = (absQty - whole).toFixed(8).substring(2);
-
-    let res = "";
-
-    if (Math.abs(whole) >= T) {
-        res = (whole / T).toFixed(2) + "T";
-    } else if (Math.abs(whole) >= B) {
-        res = (whole / B).toFixed(2) + "B";
-    } else if (Math.abs(whole) >= M) {
-        res = (whole / M).toFixed(2) + "M";
-    } else if (Math.abs(whole) >= K) {
-        res = (whole / K).toFixed(2) + "K";
-    } else if (Math.abs(whole) >= 100) {
-        res = `${whole}.${fraction.substring(0, 2)}`;
-    } else if (Math.abs(whole) >= 10) {
-        res = `${whole}.${fraction.substring(0, 3)}`;
-    } else {
-        res = `${whole}.${fraction.substring(0, 4)}`;
-    }
-
-    res = sign < 0 ? "-" + res : res;
-
-    return res;
 }

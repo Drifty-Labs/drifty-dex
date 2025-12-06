@@ -1,12 +1,6 @@
+import { E8s } from "./ecs.ts";
 import { Pool, type SwapArgs } from "./pool.ts";
-import {
-    almostEq,
-    BASE_PRICE,
-    MAX_TICK,
-    panic,
-    priceToTick,
-    type SwapDirection,
-} from "./utils.ts";
+import { BASE_PRICE, panic, priceToTick, type SwapDirection } from "./utils.ts";
 
 export type GenerateTradeArgs = {
     pool: Pool;
@@ -39,14 +33,21 @@ export function generateTrade(args: GenerateTradeArgs): SwapArgs {
     }
 
     const stats = args.pool.stats;
-    const baseReserve =
-        stats.base.actualReserve + stats.base.expectedReserveFromExit;
-    const quoteReserve =
-        stats.quote.actualReserve + stats.quote.expectedReserveFromExit;
+    const baseReserve = stats.base.actualReserve.add(
+        stats.base.expectedReserveFromExit
+    );
+    const quoteReserve = stats.quote.actualReserve.add(
+        stats.quote.expectedReserveFromExit
+    );
 
     let qtyIn =
-        direction === "base -> quote" ? baseReserve * 0.1 : quoteReserve * 0.1;
-    const minQtyIn = direction === "base -> quote" ? 1000 / 93000 : 1000;
+        direction === "base -> quote"
+            ? baseReserve.div(10)
+            : quoteReserve.div(10);
+    const minQtyIn =
+        direction === "base -> quote"
+            ? E8s.n(1000).div(E8s.n(93000))
+            : E8s.n(1000);
 
     while (true) {
         const poolCopy = args.pool.clone(true);
@@ -55,9 +56,9 @@ export function generateTrade(args: GenerateTradeArgs): SwapArgs {
         const nextTick = poolCopy.curAbsoluteTick;
 
         if (nextTick >= left && nextTick <= right) break;
-        qtyIn /= 2;
+        qtyIn.divAssign(2);
 
-        if (qtyIn < minQtyIn) {
+        if (qtyIn.lt(minQtyIn)) {
             qtyIn = minQtyIn;
             break;
         }
@@ -68,7 +69,7 @@ export function generateTrade(args: GenerateTradeArgs): SwapArgs {
 
 export type GenerateNextDayTickOptionsArgs = {
     todayPivotTick: number;
-    todayVolatility: number;
+    todayVolatility: E8s;
 };
 
 export type GenerateNextDayTickOptionsResult = {
@@ -97,23 +98,21 @@ export function generateNextDayPivotTick(
 }
 
 export type GenerateTodayVolumeArgs = {
-    avgDailyQuoteVolume: number;
+    avgDailyQuoteVolume: E8s;
 };
 
 export type GenerateTodayVolumeResult = {
-    todayTargetQuoteVolume: number;
+    todayTargetQuoteVolume: E8s;
 };
 
-export function generateTodayTargetQuoteVolume(
-    avgDailyQuoteVolume: number
-): number {
-    return avgDailyQuoteVolume * 2 * Math.random();
+export function generateTodayTargetQuoteVolume(avgDailyQuoteVolume: E8s): E8s {
+    return avgDailyQuoteVolume.mul(E8s.random().mul(2));
 }
 
-function volatilityToTickVolatility(vol: number): number {
-    const leftPrice = BASE_PRICE;
-    const rightPrice = leftPrice * (1 + vol);
-    const rightTick = priceToTick(rightPrice);
+function volatilityToTickVolatility(vol: E8s): number {
+    const leftPrice = BASE_PRICE.clone();
+    const rightPrice = leftPrice.mul(E8s.one().add(vol));
+    const rightTick = priceToTick(rightPrice.toNumber());
 
     if (rightTick < 1)
         panic(

@@ -1,8 +1,8 @@
 import { AMM } from "./amm.ts";
 import { type AMMSwapDirection } from "./cur-tick.ts";
+import { E8s } from "./ecs.ts";
 import { InventoryRange, ReserveRange } from "./range.ts";
 import {
-    almostEq,
     panic,
     type TwoSided,
     absoluteTickToPrice,
@@ -10,20 +10,20 @@ import {
     BASE_PRICE,
 } from "./utils.ts";
 
-const STABLE_AMM_CUT = 0.05;
-const MIN_FEES = 0.0001;
-const MAX_FEES = 0.1;
+const STABLE_AMM_CUT = new E8s(500_0000n);
+const MIN_FEES = new E8s(1_0000n);
+const MAX_FEES = new E8s(1000_0000n);
 
 export type SwapArgs = {
-    qtyIn: number;
+    qtyIn: E8s;
     direction: SwapDirection;
 };
 
 export type SwapResult = {
-    qtyOut: number;
-    feeFactor: number;
-    feesIn: number;
-    slippage: number;
+    qtyOut: E8s;
+    feeFactor: E8s;
+    feesIn: E8s;
+    slippage: E8s;
 };
 
 export class Pool {
@@ -39,13 +39,13 @@ export class Pool {
         private tickSpan: number,
         private noLogs: boolean,
         args?: {
-            baseQty: number;
-            quoteQty: number;
+            baseQty: E8s;
+            quoteQty: E8s;
         }
     ) {
         if (args) {
-            const stableBaseShare = args.baseQty * STABLE_AMM_CUT;
-            const stableQuoteShare = args.quoteQty * STABLE_AMM_CUT;
+            const stableBaseShare = args.baseQty.mul(STABLE_AMM_CUT);
+            const stableQuoteShare = args.quoteQty.mul(STABLE_AMM_CUT);
 
             this.stableAMM = {
                 base: new AMM("base", false, noLogs, curTickIdx),
@@ -61,14 +61,14 @@ export class Pool {
                 accountDepositedReserve: true,
             });
 
-            const driftingBaseShare = args.baseQty - stableBaseShare;
-            const driftingQuoteShare = args.quoteQty - stableQuoteShare;
+            const driftingBaseShare = args.baseQty.sub(stableBaseShare);
+            const driftingQuoteShare = args.quoteQty.sub(stableQuoteShare);
 
-            const dbr = driftingBaseShare / 2;
-            const dqi = driftingBaseShare - dbr;
+            const dbr = driftingBaseShare.div(2);
+            const dqi = driftingBaseShare.sub(dbr);
 
-            const dqr = driftingQuoteShare / 2;
-            const dbi = driftingQuoteShare - dqr;
+            const dqr = driftingQuoteShare.div(2);
+            const dbi = driftingQuoteShare.sub(dqr);
 
             this.driftingAMM = {
                 base: new AMM("base", true, noLogs, curTickIdx, {
@@ -110,9 +110,6 @@ export class Pool {
         return p;
     }
 
-    // TODO: forbid drifting closer than tickSpan
-    // TODO: instead of syntetic initial deposit, make a regular deposit
-
     private drift() {
         const baseWorst = this.driftingAMM.base.worstInventoryTick;
 
@@ -129,14 +126,14 @@ export class Pool {
 
     public swap(args: SwapArgs): SwapResult {
         const feeFactor = this.feeFactor;
-        const fees = args.qtyIn * feeFactor;
-        const qtyIn = args.qtyIn - fees;
+        const fees = args.qtyIn.mul(feeFactor);
+        const qtyIn = args.qtyIn.sub(fees);
 
-        const stableFees = fees * STABLE_AMM_CUT;
-        const driftingFees = fees - stableFees;
+        const stableFees = fees.mul(STABLE_AMM_CUT);
+        const driftingFees = fees.sub(stableFees);
 
-        let expectedOut: number = 0;
-        let qtyOut: number = 0;
+        let expectedOut = E8s.zero();
+        let qtyOut = E8s.zero();
 
         const tickBefore = this.curAbsoluteTick;
 
@@ -146,17 +143,17 @@ export class Pool {
                 driftingFees
             );
 
-            expectedOut =
-                qtyIn *
-                absoluteTickToPrice(this.curAbsoluteTick, "base", "reserve");
+            expectedOut = qtyIn.mul(
+                absoluteTickToPrice(this.curAbsoluteTick, "base", "reserve")
+            );
             qtyOut = this._swap(qtyIn, args.direction);
         } else {
             this.stableAMM["base"].currentTick.addInventoryFees(stableFees);
             this.driftingAMM["base"].currentTick.addInventoryFees(driftingFees);
 
-            expectedOut =
-                qtyIn *
-                absoluteTickToPrice(this.curAbsoluteTick, "quote", "reserve");
+            expectedOut = qtyIn.mul(
+                absoluteTickToPrice(this.curAbsoluteTick, "quote", "reserve")
+            );
             qtyOut = this._swap(qtyIn, args.direction);
         }
 
@@ -164,12 +161,9 @@ export class Pool {
 
         const tickAfter = this.curAbsoluteTick;
 
-        const priceChange = Math.pow(
-            BASE_PRICE,
-            Math.abs(tickBefore - tickAfter)
-        );
+        const priceChange = BASE_PRICE.pow(Math.abs(tickBefore - tickAfter));
 
-        const slippage = 1 - qtyOut / expectedOut;
+        const slippage = E8s.one().sub(qtyOut.div(expectedOut));
 
         if (!this.noLogs) {
             console.log(
@@ -180,21 +174,23 @@ export class Pool {
                 qtyOut
             );
             console.log(
-                `Slippage: ${(slippage * 100).toFixed(
-                    2
-                )}%, price change: ${tickBefore} -> ${tickAfter} (${(
-                    (priceChange - 1) *
-                    100
-                ).toFixed(2)}%)`
+                `Slippage: ${slippage
+                    .mul(100)
+                    .toString(
+                        2
+                    )}%, price change: ${tickBefore} -> ${tickAfter} (${priceChange
+                    .sub(E8s.one())
+                    .mul(100)
+                    .toString(2)}%)`
             );
         }
 
         return { qtyOut, feeFactor, feesIn: fees, slippage };
     }
 
-    public deposit(side: keyof TwoSided<AMM>, qty: number) {
-        const stableCut = qty * STABLE_AMM_CUT;
-        const driftingCut = qty - stableCut;
+    public deposit(side: keyof TwoSided<AMM>, qty: E8s) {
+        const stableCut = qty.mul(STABLE_AMM_CUT);
+        const driftingCut = qty.sub(stableCut);
 
         this.stableAMM[side].deposit({
             reserve: stableCut,
@@ -208,16 +204,16 @@ export class Pool {
         });
     }
 
-    public withdraw(side: keyof TwoSided<AMM>, qty: number) {
-        const stableCut = qty * STABLE_AMM_CUT;
-        const driftingCut = qty - stableCut;
+    public withdraw(side: keyof TwoSided<AMM>, qty: E8s) {
+        const stableCut = qty.mul(STABLE_AMM_CUT);
+        const driftingCut = qty.sub(stableCut);
 
         this.stableAMM[side].withdraw({ depositedReserve: stableCut });
         this.driftingAMM[side].withdraw({ depositedReserve: driftingCut });
     }
 
-    private _swap(qtyIn: number, direction: SwapDirection): number {
-        let qtyOut = 0;
+    private _swap(qtyIn: E8s, direction: SwapDirection): E8s {
+        let qtyOut = E8s.zero();
 
         let baseDirection: AMMSwapDirection;
         let quoteDirection: AMMSwapDirection;
@@ -230,14 +226,14 @@ export class Pool {
             quoteDirection = "reserve -> inventory";
         }
 
-        const amms: [AMM, AMMSwapDirection, number][] = [
-            [this.stableAMM.base, baseDirection, 0],
-            [this.driftingAMM.base, baseDirection, 0],
-            [this.stableAMM.quote, quoteDirection, 0],
-            [this.driftingAMM.quote, quoteDirection, 0],
+        const amms: [AMM, AMMSwapDirection, E8s][] = [
+            [this.stableAMM.base, baseDirection, E8s.zero()],
+            [this.driftingAMM.base, baseDirection, E8s.zero()],
+            [this.stableAMM.quote, quoteDirection, E8s.zero()],
+            [this.driftingAMM.quote, quoteDirection, E8s.zero()],
         ];
 
-        while (!almostEq(qtyIn, 0)) {
+        while (!qtyIn.isZero()) {
             let hasAny = false;
 
             // Keep swapping with each AMM until it's fully exhausted
@@ -251,28 +247,28 @@ export class Pool {
                     qtyIn,
                 });
 
-                if (recoveredReserve > 0) {
-                    amm[2] += recoveredReserve;
+                if (recoveredReserve.isPositive()) {
+                    amm[2].addAssign(recoveredReserve);
                 }
 
-                if (reminderIn < qtyIn) {
+                if (reminderIn.lt(qtyIn)) {
                     hasAny = true;
                     qtyIn = reminderIn;
-                    qtyOut += q;
+                    qtyOut.addAssign(q);
                 }
 
-                if (almostEq(qtyIn, 0)) break;
+                if (qtyIn.isZero()) break;
             }
 
-            if (almostEq(qtyIn, 0)) {
+            if (qtyIn.isZero()) {
                 for (const amm of amms) {
-                    if (amm[2] > 0) {
+                    if (amm[2].isPositive()) {
                         amm[0].deposit({
-                            reserve: amm[2],
+                            reserve: amm[2].clone(),
                             tickSpan: this.tickSpan,
                             accountDepositedReserve: false,
                         });
-                        amm[2] = 0;
+                        amm[2] = E8s.zero();
                     }
                 }
 
@@ -281,7 +277,7 @@ export class Pool {
 
             // Check if we should move ticks
             // We can only move if ALL AMMs have exhausted the asset they PROVIDE
-            if (!hasAny && !almostEq(qtyIn, 0)) {
+            if (!hasAny && !qtyIn.isZero()) {
                 // Move ALL AMMs together
                 if (direction === "base -> quote") {
                     this.stableAMM.base.currentTick.nextInventoryTick();
@@ -308,25 +304,29 @@ export class Pool {
         return this.driftingAMM.base.currentTick.index;
     }
 
-    public get depositedReserves(): TwoSided<number> {
+    public get depositedReserves(): TwoSided<E8s> {
         return {
             base: this.driftingAMM.base.depositedReserve,
             quote: this.driftingAMM.quote.depositedReserve,
         };
     }
 
-    public get il(): TwoSided<number> {
+    public get il(): TwoSided<E8s> {
         return {
-            base:
-                this.stableAMM.base.il * STABLE_AMM_CUT +
-                this.driftingAMM.base.il * (1 - STABLE_AMM_CUT),
-            quote:
-                this.stableAMM.quote.il * STABLE_AMM_CUT +
-                this.driftingAMM.quote.il * (1 - STABLE_AMM_CUT),
+            base: this.stableAMM.base.il
+                .mul(STABLE_AMM_CUT)
+                .add(
+                    this.driftingAMM.base.il.mul(E8s.one().sub(STABLE_AMM_CUT))
+                ),
+            quote: this.stableAMM.quote.il
+                .mul(STABLE_AMM_CUT)
+                .add(
+                    this.driftingAMM.quote.il.mul(E8s.one().sub(STABLE_AMM_CUT))
+                ),
         };
     }
 
-    public get driftingReserveWidth(): TwoSided<number> {
+    public get driftingReserveWidth(): TwoSided<E8s> {
         const baseReserve = this.driftingAMM.base["_liquidity"].reserve;
         const baseWidth = baseReserve.isInitted() ? baseReserve.width : 0;
 
@@ -336,28 +336,34 @@ export class Pool {
         return {
             base:
                 baseWidth > 0
-                    ? Math.pow(BASE_PRICE, baseWidth) / BASE_PRICE - 1
-                    : 0,
+                    ? BASE_PRICE.pow(baseWidth).div(BASE_PRICE).sub(E8s.one())
+                    : E8s.zero(),
             quote:
                 quoteWidth > 0
-                    ? Math.pow(BASE_PRICE, quoteWidth) / BASE_PRICE - 1
-                    : 0,
+                    ? BASE_PRICE.pow(quoteWidth).div(BASE_PRICE).sub(E8s.one())
+                    : E8s.zero(),
         };
     }
 
-    public get feeFactor(): number {
+    public get feeFactor(): E8s {
         const { base: bf, quote: qf } = this.il;
         const { base: bw, quote: qw } = this.driftingReserveWidth;
 
-        return this.calculateFees((bf + qf) / 2, (bw + qw) / 2);
+        return this.calculateFees(bf.add(qf).div(2), bw.add(qw).div(2));
     }
 
-    private calculateFees(il: number, width: number): number {
-        const ilFees =
-            MIN_FEES + (il <= 0.9 ? (MAX_FEES * il) / 0.9 : MAX_FEES);
-        const widthFees = MIN_FEES + Math.min(width, 1) * MAX_FEES;
+    private calculateFees(il: E8s, width: E8s): E8s {
+        const ilFees = MIN_FEES.add(
+            il.le(E8s.half())
+                ? MAX_FEES.mul(il).div(E8s.half())
+                : MAX_FEES.clone()
+        );
 
-        return (ilFees + widthFees) / 2;
+        const widthFees = MIN_FEES.add(
+            MAX_FEES.mul(width.gt(E8s.one()) ? E8s.one() : width)
+        );
+
+        return ilFees.add(widthFees).div(2);
     }
 
     public get liquidityDigest(): LiquidityDigestAbsolute {
@@ -382,24 +388,24 @@ export class Pool {
 
         // collect all liquidity from the current tick
 
-        const baseCurTickLiq =
-            db.curTick.reserve +
-            dq.curTick.inventory +
-            sb.curTick.reserve +
-            sq.curTick.inventory;
+        const baseCurTickLiq = db.curTick.reserve
+            .add(dq.curTick.inventory)
+            .add(sb.curTick.reserve)
+            .add(sq.curTick.inventory);
 
-        const quoteCurTickLiq =
-            dq.curTick.reserve +
-            db.curTick.inventory +
-            sq.curTick.reserve +
-            sb.curTick.inventory;
+        const quoteCurTickLiq = dq.curTick.reserve
+            .add(db.curTick.inventory)
+            .add(sq.curTick.reserve)
+            .add(sb.curTick.inventory);
 
         // collect all collateral
 
-        const baseRecoveryBin =
-            dq.recoveryBin.collateral + sq.recoveryBin.collateral;
-        const quoteRecoveryBin =
-            db.recoveryBin.collateral + sb.recoveryBin.collateral;
+        const baseRecoveryBin = dq.recoveryBin.collateral.add(
+            sq.recoveryBin.collateral
+        );
+        const quoteRecoveryBin = db.recoveryBin.collateral.add(
+            sb.recoveryBin.collateral
+        );
 
         return {
             base: {
@@ -423,44 +429,44 @@ export class Pool {
     }
 
     public get stats(): TwoSided<Stats> {
-        const actualBaseInv =
-            this.driftingAMM.base.actualInventory +
-            this.stableAMM.base.actualInventory;
+        const actualBaseInv = this.driftingAMM.base.actualInventory.add(
+            this.stableAMM.base.actualInventory
+        );
 
         const base: Stats = {
-            depositedReserve:
-                this.driftingAMM.base.depositedReserve +
-                this.stableAMM.base.depositedReserve,
-            actualReserve:
-                this.driftingAMM.base.actualReserve +
-                this.stableAMM.base.actualReserve,
+            depositedReserve: this.driftingAMM.base.depositedReserve.add(
+                this.stableAMM.base.depositedReserve
+            ),
+            actualReserve: this.driftingAMM.base.actualReserve.add(
+                this.stableAMM.base.actualReserve
+            ),
             actualInventory: actualBaseInv,
-            respectiveReserve:
-                this.driftingAMM.base.respectiveReserve +
-                this.stableAMM.base.respectiveReserve,
-            expectedReserveFromExit:
-                actualBaseInv *
-                absoluteTickToPrice(this.curAbsoluteTick, "base", "inventory"),
+            respectiveReserve: this.driftingAMM.base.respectiveReserve.add(
+                this.stableAMM.base.respectiveReserve
+            ),
+            expectedReserveFromExit: actualBaseInv.mul(
+                absoluteTickToPrice(this.curAbsoluteTick, "base", "inventory")
+            ),
         };
 
-        const actualQuoteInv =
-            this.driftingAMM.quote.actualInventory +
-            this.stableAMM.quote.actualInventory;
+        const actualQuoteInv = this.driftingAMM.quote.actualInventory.add(
+            this.stableAMM.quote.actualInventory
+        );
 
         const quote: Stats = {
-            depositedReserve:
-                this.driftingAMM.quote.depositedReserve +
-                this.stableAMM.quote.depositedReserve,
-            actualReserve:
-                this.driftingAMM.quote.actualReserve +
-                this.stableAMM.quote.actualReserve,
+            depositedReserve: this.driftingAMM.quote.depositedReserve.add(
+                this.stableAMM.quote.depositedReserve
+            ),
+            actualReserve: this.driftingAMM.quote.actualReserve.add(
+                this.stableAMM.quote.actualReserve
+            ),
             actualInventory: actualQuoteInv,
-            respectiveReserve:
-                this.driftingAMM.quote.respectiveReserve +
-                this.stableAMM.quote.respectiveReserve,
-            expectedReserveFromExit:
-                actualQuoteInv *
-                absoluteTickToPrice(this.curAbsoluteTick, "quote", "inventory"),
+            respectiveReserve: this.driftingAMM.quote.respectiveReserve.add(
+                this.stableAMM.quote.respectiveReserve
+            ),
+            expectedReserveFromExit: actualQuoteInv.mul(
+                absoluteTickToPrice(this.curAbsoluteTick, "quote", "inventory")
+            ),
         };
 
         return { base, quote };
@@ -468,11 +474,11 @@ export class Pool {
 }
 
 export type Stats = {
-    depositedReserve: number;
-    actualReserve: number;
-    actualInventory: number;
-    respectiveReserve: number;
-    expectedReserveFromExit: number;
+    depositedReserve: E8s;
+    actualReserve: E8s;
+    actualInventory: E8s;
+    respectiveReserve: E8s;
+    expectedReserveFromExit: E8s;
 };
 
 export type LiquidityDigestAbsolute = {
@@ -486,11 +492,11 @@ export type LiquidityDigestAbsolute = {
     };
     currentTick: {
         idx: number;
-        base: number;
-        quote: number;
+        base: E8s;
+        quote: E8s;
     };
     recoveryBinCollateral: {
-        base: number;
-        quote: number;
+        base: E8s;
+        quote: E8s;
     };
 };

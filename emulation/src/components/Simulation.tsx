@@ -5,14 +5,9 @@ import {
     generateTodayTargetQuoteVolume,
     generateTrade,
 } from "../logic/trade-gen.ts";
-import {
-    absoluteTickToPrice,
-    almostEq,
-    delay,
-    panic,
-    tokensToStr,
-} from "../logic/utils.ts";
+import { absoluteTickToPrice, delay, panic } from "../logic/utils.ts";
 import { LiquidityChart } from "./LiquidityChart.tsx";
+import { E8s } from "../logic/ecs.ts";
 
 const CURRENT_TICK = 114445; // 93323 USDC per 1 BTC | 4 Dec 2025
 const INIT_TICKS = 1000; // +-10% around cur price
@@ -24,8 +19,8 @@ const AVG_DAILY_VOLATILITY = 0.0006666; // ~2% monthly, according to https://bit
 const UNISWAP_APR = 0.3279; // WBTC/USDT | 4 Dec 2025
 
 let POOL = new Pool(CURRENT_TICK, INIT_TICKS, false, {
-    baseQty: BTC_QTY,
-    quoteQty: USD_QTY,
+    baseQty: E8s.n(BTC_QTY),
+    quoteQty: E8s.n(USD_QTY),
 });
 
 const ORIGINAL_STATS = POOL.stats;
@@ -40,15 +35,17 @@ export function Simulation() {
 
     const [today, setToday] = createSignal({
         day: 1,
-        quoteVolume: 0,
+        quoteVolume: E8s.zero(),
         pivotTick: CURRENT_TICK,
-        targetQuoteVolume: generateTodayTargetQuoteVolume(AVG_DAILY_VOLUME),
-        fees: 0,
+        targetQuoteVolume: generateTodayTargetQuoteVolume(
+            E8s.n(AVG_DAILY_VOLUME)
+        ),
+        fees: E8s.zero(),
     });
 
-    const [_avgSlippage24h, setAvgSlippage24h] = createSignal<number[]>([]);
+    const [_avgSlippage24h, setAvgSlippage24h] = createSignal<E8s[]>([]);
 
-    const addSlippage = (slippage: number) => {
+    const addSlippage = (slippage: E8s) => {
         setAvgSlippage24h((s) => {
             s.push(slippage);
             return [...s];
@@ -57,14 +54,16 @@ export function Simulation() {
 
     const avgSlippage24h = () => {
         const s100 = _avgSlippage24h();
-        if (s100.length === 0) return 0;
+        if (s100.length === 0) return E8s.zero();
 
-        return s100.reduce((prev, cur) => prev + cur, 0) / s100.length;
+        return s100
+            .reduce((prev, cur) => prev.add(cur), E8s.zero())
+            .div(s100.length);
     };
 
-    const [_avgTradeSize24h, setAvgTradeSize24h] = createSignal<number[]>([]);
+    const [_avgTradeSize24h, setAvgTradeSize24h] = createSignal<E8s[]>([]);
 
-    const addTradeQuote = (tradeQuote: number) => {
+    const addTradeQuote = (tradeQuote: E8s) => {
         setAvgTradeSize24h((t) => {
             t.push(tradeQuote);
             return [...t];
@@ -73,45 +72,47 @@ export function Simulation() {
 
     const avgTradeSize24h = () => {
         const t100 = _avgTradeSize24h();
-        if (t100.length === 0) return 0;
+        if (t100.length === 0) return E8s.zero();
 
-        return t100.reduce((prev, cur) => prev + cur, 0) / t100.length;
+        return t100
+            .reduce((prev, cur) => prev.add(cur), E8s.zero())
+            .div(t100.length);
     };
 
-    const [fees29d, setFees29d] = createSignal<number[]>([]);
+    const [fees29d, setFees29d] = createSignal<E8s[]>([]);
 
     const avgFees30d = () => {
         const f29d = fees29d();
         const fToday = today().fees;
 
-        if (fToday === 0 && f29d.length === 0) return 0;
+        if (fToday.isZero() && f29d.length === 0) return E8s.zero();
 
-        return (
-            (f29d.reduce((prev, cur) => prev + cur, 0) + fToday) /
-            (f29d.length + (fToday === 0 ? 0 : 1))
-        );
+        return f29d
+            .reduce((prev, cur) => prev.add(cur), E8s.zero())
+            .add(fToday)
+            .div(f29d.length + (fToday.isZero() ? 0 : 1));
     };
 
-    const [volume29d, setVolume29d] = createSignal<number[]>([]);
+    const [volume29d, setVolume29d] = createSignal<E8s[]>([]);
 
     const avgVolume30d = () => {
         const v29d = volume29d();
         const vToday = today().quoteVolume;
 
-        if (vToday === 0 && v29d.length === 0) return 0;
+        if (vToday.isZero() && v29d.length === 0) return E8s.zero();
 
-        return (
-            (v29d.reduce((prev, cur) => prev + cur, 0) + vToday) /
-            (v29d.length + (vToday === 0 ? 0 : 1))
-        );
+        return v29d
+            .reduce((prev, cur) => prev.add(cur), E8s.zero())
+            .add(vToday)
+            .div(v29d.length + (vToday.isZero() ? 0 : 1));
     };
 
-    const nextDay = (vol: number, f: number) => {
+    const nextDay = (vol: E8s, f: E8s) => {
         setToday(({ day, quoteVolume, targetQuoteVolume, pivotTick, fees }) => {
-            quoteVolume += vol;
-            fees += f;
+            quoteVolume.addAssign(vol);
+            fees.addAssign(f);
 
-            if (quoteVolume < targetQuoteVolume)
+            if (quoteVolume.lt(targetQuoteVolume))
                 return {
                     day,
                     quoteVolume,
@@ -135,14 +136,13 @@ export function Simulation() {
             });
 
             day += 1;
-            quoteVolume = 0;
-            fees = 0;
-            targetQuoteVolume =
-                (stats().quote.actualReserve +
-                    stats().quote.expectedReserveFromExit) *
-                2.5;
+            quoteVolume = E8s.zero();
+            fees = E8s.zero();
+            targetQuoteVolume = stats()
+                .quote.actualReserve.add(stats().quote.expectedReserveFromExit)
+                .mul(2.5);
             pivotTick = generateNextDayPivotTick({
-                todayVolatility: AVG_DAILY_VOLATILITY,
+                todayVolatility: E8s.n(AVG_DAILY_VOLATILITY),
                 todayPivotTick: pivotTick,
             });
 
@@ -168,7 +168,7 @@ export function Simulation() {
             ? _args
             : generateTrade({
                   pool: POOL,
-                  todayVolatility: AVG_DAILY_VOLATILITY,
+                  todayVolatility: E8s.n(AVG_DAILY_VOLATILITY),
                   todayPivotTick: t.pivotTick,
               });
 
@@ -177,9 +177,14 @@ export function Simulation() {
         try {
             const quoteVolume =
                 args.direction === "base -> quote"
-                    ? args.qtyIn *
-                      absoluteTickToPrice(cp.curAbsoluteTick, "base", "reserve")
-                    : args.qtyIn;
+                    ? args.qtyIn.mul(
+                          absoluteTickToPrice(
+                              cp.curAbsoluteTick,
+                              "base",
+                              "reserve"
+                          )
+                      )
+                    : args.qtyIn.clone();
 
             const statsBefore = cp.stats;
 
@@ -188,35 +193,33 @@ export function Simulation() {
 
             const statsAfter = cp.stats;
 
-            const baseReserveBefore =
-                statsAfter.base.actualReserve +
-                statsAfter.base.respectiveReserve;
-            const baseReserveAfter =
-                statsBefore.base.actualReserve +
-                statsBefore.base.respectiveReserve;
+            const baseReserveBefore = statsAfter.base.actualReserve.add(
+                statsAfter.base.respectiveReserve
+            );
+            const baseReserveAfter = statsBefore.base.actualReserve.add(
+                statsBefore.base.respectiveReserve
+            );
 
-            if (!almostEq(Math.abs(baseReserveBefore - baseReserveAfter), 0)) {
+            if (!baseReserveBefore.sub(baseReserveAfter).abs().isZero()) {
                 panic(
-                    `Base reserve has decreased! (after - before = ${(
-                        baseReserveAfter - baseReserveBefore
-                    ).toFixed(8)})`
+                    `Base reserve has decreased! (after - before = ${baseReserveAfter
+                        .sub(baseReserveBefore)
+                        .toString()})`
                 );
             }
 
-            const quoteReserveBefore =
-                statsAfter.quote.actualReserve +
-                statsAfter.quote.respectiveReserve;
-            const quoteReserveAfter =
-                statsBefore.quote.actualReserve +
-                statsBefore.quote.respectiveReserve;
+            const quoteReserveBefore = statsAfter.quote.actualReserve.add(
+                statsAfter.quote.respectiveReserve
+            );
+            const quoteReserveAfter = statsBefore.quote.actualReserve.add(
+                statsBefore.quote.respectiveReserve
+            );
 
-            if (
-                !almostEq(Math.abs(quoteReserveBefore - quoteReserveAfter), 0)
-            ) {
+            if (!quoteReserveBefore.sub(quoteReserveAfter).abs().isZero()) {
                 panic(
-                    `Quote reserve has decreased! (after - before = ${(
-                        quoteReserveAfter - quoteReserveBefore
-                    ).toFixed(8)})`
+                    `Quote reserve has decreased! (after - before = ${quoteReserveAfter
+                        .sub(quoteReserveBefore)
+                        .toString()})`
                 );
             }
 
@@ -254,23 +257,25 @@ export function Simulation() {
     const quoteProfit = () => {
         const s = stats();
 
-        const reserveNow =
-            s.quote.actualReserve + s.quote.expectedReserveFromExit;
+        const reserveNow = s.quote.actualReserve.add(
+            s.quote.expectedReserveFromExit
+        );
 
         const reserveThen = ORIGINAL_STATS.quote.depositedReserve;
 
-        return reserveNow - reserveThen;
+        return reserveNow.sub(reserveThen);
     };
 
     const baseProfit = () => {
         const s = stats();
 
-        const reserveNow =
-            s.base.actualReserve + s.base.expectedReserveFromExit;
+        const reserveNow = s.base.actualReserve.add(
+            s.base.expectedReserveFromExit
+        );
 
         const reserveThen = ORIGINAL_STATS.base.depositedReserve;
 
-        return reserveNow - reserveThen;
+        return reserveNow.sub(reserveThen);
     };
 
     return (
@@ -304,16 +309,22 @@ export function Simulation() {
                 <div class="flex flex-row gap-x-10 gap-y-2 flex-wrap">
                     <p>Day: {today().day}</p>
                     <p>
-                        Daily Volume (avg. 30d): ${tokensToStr(avgVolume30d())}
+                        Daily Volume (avg. 30d): $
+                        {avgVolume30d().toShortString()}
                     </p>
-                    <p>Daily Fees (avg. 30d): ${tokensToStr(avgFees30d())}</p>
-                    <p>Fee % (real-time): {(feeFactor() * 100).toFixed(2)}%</p>
+                    <p>
+                        Daily Fees (avg. 30d): ${avgFees30d().toShortString()}
+                    </p>
+                    <p>
+                        Fee % (real-time): {feeFactor().mul(100).toString(2)}%
+                    </p>
                     <p>
                         Slippage % (avg. 24h):{" "}
-                        {(avgSlippage24h() * 100).toFixed(2)}%
+                        {avgSlippage24h().mul(100).toString(2)}%
                     </p>
                     <p>
-                        Trade Size (avg. 24h): ${tokensToStr(avgTradeSize24h())}
+                        Trade Size (avg. 24h): $
+                        {avgTradeSize24h().toShortString()}
                     </p>
                 </div>
 
@@ -321,29 +332,33 @@ export function Simulation() {
                     <div class="flex flex-col gap-2">
                         <h3>USD AMM</h3>
                         <p>
-                            Reserve: ${tokensToStr(stats().quote.actualReserve)}
+                            Reserve: $
+                            {stats().quote.actualReserve.toShortString()}
                         </p>
                         <p>
                             Inventory: $
-                            {tokensToStr(stats().quote.respectiveReserve)}
+                            {stats().quote.respectiveReserve.toShortString()}
                         </p>
                         <p>
-                            Impermanent Loss: {(il().quote * 100).toFixed(2)}%
+                            Impermanent Loss: {il().quote.mul(100).toString(2)}%
                         </p>
-                        <p>Total Profit: ${tokensToStr(quoteProfit())}</p>
+                        <p>Total Profit: ${quoteProfit().toShortString()}</p>
                     </div>
 
                     <div class="flex flex-col gap-2">
                         <h3>BTC AMM</h3>
                         <p>
-                            Reserve: ₿{tokensToStr(stats().base.actualReserve)}
+                            Reserve: ₿
+                            {stats().base.actualReserve.toShortString()}
                         </p>
                         <p>
                             Inventory: ₿
-                            {tokensToStr(stats().base.respectiveReserve)}
+                            {stats().base.respectiveReserve.toShortString()}
                         </p>
-                        <p>Impermanent Loss: {(il().base * 100).toFixed(2)}%</p>
-                        <p>Total Profit: ₿{tokensToStr(baseProfit())}</p>
+                        <p>
+                            Impermanent Loss: {il().base.mul(100).toString(2)}%
+                        </p>
+                        <p>Total Profit: ₿{baseProfit().toShortString()}</p>
                     </div>
                 </div>
             </div>

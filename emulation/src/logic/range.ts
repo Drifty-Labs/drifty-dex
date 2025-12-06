@@ -1,25 +1,19 @@
-import {
-    absoluteTickToPrice,
-    almostEq,
-    BASE_PRICE,
-    panic,
-    QUOTE_PRICE,
-    type Side,
-} from "./utils.ts";
+import { E8s } from "./ecs.ts";
+import { absoluteTickToPrice, panic, QUOTE_PRICE, type Side } from "./utils.ts";
 
 /**
  * The result of taking a tick from a range.
  */
 export type TakeResult = {
     /** The quantity of liquidity taken. */
-    qty: number;
+    qty: E8s;
     /** The index of the tick taken. */
     tickIdx: number;
 };
 
 export abstract class Range {
     constructor(
-        protected _qty: number,
+        protected _qty: E8s,
         protected _left: number,
         protected _right: number,
         protected _side: Side
@@ -46,12 +40,12 @@ export abstract class Range {
     public get qty() {
         this.assertBoundsOk();
 
-        return this._qty;
+        return this._qty.clone();
     }
 
     public isEmpty() {
         const empty = this.width <= 0;
-        if (empty && !almostEq(this._qty, 0))
+        if (empty && !this._qty.isZero())
             panic(
                 `The range is empty, but there is still ${this._qty} liquidity`
             );
@@ -83,7 +77,7 @@ export class ReserveRange extends Range {
         this.assertBoundsOk();
 
         return new ReserveRange(
-            this._qty,
+            this._qty.clone(),
             this._left,
             this._right,
             this._side,
@@ -93,40 +87,40 @@ export class ReserveRange extends Range {
     }
 
     constructor(
-        qty: number,
+        qty: E8s,
         left: number,
         right: number,
         side: Side,
         private noLogs: boolean,
         private isDrifting: boolean
     ) {
-        super(qty, left, right, side);
+        super(qty.clone(), left, right, side);
 
         this.assertBoundsOk();
     }
 
-    public put(qty: number) {
+    public put(qty: E8s) {
         this.assertNonEmpty();
         this.assertBoundsOk();
 
-        this._qty += qty;
+        this.qty.addAssign(qty);
     }
 
-    public withdrawCut(cut: number): number {
+    public withdrawCut(cut: E8s): E8s {
         this.assertNonEmpty();
         this.assertBoundsOk();
 
-        const qty = this._qty * cut;
-        this._qty -= qty;
+        const qty = this._qty.mul(cut);
+        this._qty.subAssign(qty);
 
         return qty;
     }
 
-    public putBest(qty: number) {
+    public putBest(qty: E8s) {
         this.assertNonEmpty();
         this.assertBoundsOk();
 
-        this._qty += qty;
+        this._qty.addAssign(qty);
 
         if (this.isBase()) {
             this._left -= 1;
@@ -139,8 +133,8 @@ export class ReserveRange extends Range {
         this.assertNonEmpty();
         this.assertBoundsOk();
 
-        const qty = this._qty / this.width;
-        this._qty -= qty;
+        const qty = this._qty.div(this.width);
+        this._qty.subAssign(qty);
 
         const tick = this.isBase() ? this.left : this.right;
         if (this.isBase()) {
@@ -156,7 +150,7 @@ export class ReserveRange extends Range {
         this.assertNonEmpty();
         this.assertBoundsOk();
 
-        const qty = this._qty / this.width;
+        const qty = this._qty.div(this.width);
         const tick = this.isBase() ? this.left : this.right;
 
         return { qty, tickIdx: tick };
@@ -166,8 +160,8 @@ export class ReserveRange extends Range {
         this.assertNonEmpty();
         this.assertBoundsOk();
 
-        const qty = this._qty / this.width;
-        this._qty -= qty;
+        const qty = this._qty.div(this.width);
+        this._qty.subAssign(qty);
 
         const tick = this.isBase() ? this.right : this.left;
         if (this.isBase()) {
@@ -183,7 +177,7 @@ export class ReserveRange extends Range {
         this.assertNonEmpty();
         this.assertBoundsOk();
 
-        const qty = this._qty / this.width;
+        const qty = this._qty.div(this.width);
         const tick = this.isBase() ? this.right : this.left;
 
         return { qty, tickIdx: tick };
@@ -205,14 +199,14 @@ export class ReserveRange extends Range {
 
 export class InventoryRange extends Range {
     constructor(
-        qty: number,
+        qty: E8s,
         left: number,
         right: number,
         side: Side,
         private noLogs: boolean,
         private isDrifting: boolean
     ) {
-        super(qty, left, right, side);
+        super(qty.clone(), left, right, side);
         this.assertBoundsOk();
     }
 
@@ -220,7 +214,7 @@ export class InventoryRange extends Range {
         this.assertBoundsOk();
 
         return new InventoryRange(
-            this._qty,
+            this._qty.clone(),
             this._left,
             this._right,
             this._side,
@@ -234,7 +228,7 @@ export class InventoryRange extends Range {
         this.assertBoundsOk();
 
         const qty = this.bestTickQty();
-        this._qty -= qty;
+        this._qty.subAssign(qty);
 
         const tick = this.isBase() ? this.right : this.left;
         if (this.isBase()) {
@@ -244,7 +238,7 @@ export class InventoryRange extends Range {
         }
 
         if (this.isEmpty()) {
-            this._qty = 0;
+            this._qty = E8s.zero();
         }
 
         return { qty, tickIdx: tick };
@@ -265,7 +259,7 @@ export class InventoryRange extends Range {
         this.assertBoundsOk();
 
         const qty = this.worstTickQty();
-        this._qty -= qty;
+        this._qty.subAssign(qty);
 
         const tick = this.isBase() ? this.left : this.right;
         if (this.isBase()) {
@@ -275,7 +269,7 @@ export class InventoryRange extends Range {
         }
 
         if (this.isEmpty()) {
-            this._qty = 0;
+            this._qty = E8s.zero();
         }
 
         return { qty, tickIdx: tick };
@@ -291,11 +285,11 @@ export class InventoryRange extends Range {
         return { qty, tickIdx: tick };
     }
 
-    public putBest(qty: number, curTick: number) {
+    public putBest(qty: E8s, curTick: number) {
         this.assertNonEmpty();
         this.assertBoundsOk();
 
-        this._qty += qty;
+        this._qty.addAssign(qty);
 
         if (this.isBase()) {
             this._right += 1;
@@ -311,35 +305,35 @@ export class InventoryRange extends Range {
             );
     }
 
-    public calcRespectiveReserve(): number {
+    public calcRespectiveReserve(): E8s {
         this.assertNonEmpty();
         this.assertBoundsOk();
 
         // reserve is always uniform for a single inventory range
         const i = this.peekBest();
-        const r =
-            i.qty * absoluteTickToPrice(i.tickIdx, this._side, "inventory");
+        const r = i.qty.mul(
+            absoluteTickToPrice(i.tickIdx, this._side, "inventory")
+        );
 
         // which means we can simply multiply by width
-        return r * this.width;
+        return r.mul(this.width);
     }
 
-    private bestTickQty(): number {
+    private bestTickQty(): E8s {
         this.assertBoundsOk();
 
-        if (this.width === 1) return this.qty;
+        if (this.width === 1) return this.qty.clone();
 
-        return (
-            (this.qty * (1 - QUOTE_PRICE)) /
-            (1 - Math.pow(QUOTE_PRICE, this.width))
-        );
+        return this.qty
+            .mul(E8s.one().sub(QUOTE_PRICE))
+            .div(E8s.one().sub(QUOTE_PRICE.pow(this.width)));
     }
 
-    private worstTickQty(): number {
+    private worstTickQty(): E8s {
         this.assertBoundsOk();
 
-        if (this.width === 1) return this.qty;
+        if (this.width === 1) return this.qty.clone();
 
-        return this.bestTickQty() * Math.pow(QUOTE_PRICE, this.width - 1);
+        return this.bestTickQty().mul(QUOTE_PRICE.pow(this.width - 1));
     }
 }

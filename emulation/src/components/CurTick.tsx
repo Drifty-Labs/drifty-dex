@@ -9,7 +9,8 @@ export type CurTickProps = {
 
 export function CurTick(props: CurTickProps) {
     const quote = () =>
-        props.quote * absoluteTickToPrice(props.idx, "quote", "reserve");
+        props.quote *
+        absoluteTickToPrice(props.idx, "quote", "reserve").toNumber();
     const max = () => quote() + props.base;
 
     const quoteHeight = () => Math.max((quote() * 100) / max(), 1);
