@@ -1,4 +1,4 @@
-const base: bigint = 1_0000_0000n;
+const base: bigint = 1_0000_0000_0000_0000n;
 const basen: number = 1_0000_0000;
 
 export class E8s {
@@ -8,7 +8,7 @@ export class E8s {
         return new E8s(this._val);
     }
 
-    public toString(decimals: number = 8) {
+    public toString(decimals: number = 16) {
         const sign = this.sign();
         let whole = this._val / base;
         let fraction = this._val % base;
@@ -20,7 +20,7 @@ export class E8s {
 
         return `${sign === -1 ? "-" : ""}${whole}.${fraction
             .toString()
-            .padStart(8, "0")
+            .padStart(16, "0")
             .substring(0, decimals)}`;
     }
 
@@ -63,7 +63,7 @@ export class E8s {
         const whole = a._val / base;
         const fraction = a._val % base;
 
-        return Number(whole) + Number(fraction) / basen;
+        return Number(whole) + Number(fraction / BigInt(basen)) / basen;
     }
 
     public add(other: E8s): E8s {
@@ -145,7 +145,7 @@ export class E8s {
     }
 
     public static _sign(a: E8s): -1 | 1 {
-        return a._val > 0n ? 1 : -1;
+        return a._val >= 0n ? 1 : -1;
     }
 
     public inv(): E8s {
@@ -299,9 +299,10 @@ export class E8s {
     }
 
     public static n(n: number): E8s {
-        const val = n > 0 ? Math.floor(n * basen) : Math.ceil(n * basen);
-
-        return new E8s(BigInt(val));
+        return new E8s(
+            BigInt(n > 0 ? Math.floor(n * basen) : Math.ceil(n * basen)) /
+                BigInt(basen)
+        );
     }
 
     public static b(b: bigint): E8s {

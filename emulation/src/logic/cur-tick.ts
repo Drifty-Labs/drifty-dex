@@ -434,10 +434,24 @@ export class RecoveryBin {
                 absoluteTickToPrice(args.curTickIdx, this.side, "reserve")
             );
 
-            if (curTickProducedInventory.lt(this._worstTick.inventory))
+            if (curTickProducedInventory.lt(this._worstTick.inventory)) {
+                const wti = this._worstTick.inventory.toNumber();
+                const wtrr = wti * Math.pow(1.0001, this._worstTick.idx);
+                const ctpi = wtrr / Math.pow(1.0001, args.curTickIdx);
+
+                console.log(
+                    this.side,
+                    `${this._worstTick.idx} (${this._worstTick.inventory}) -> ${worstTickRespectiveReserve} -> ${args.curTickIdx} (${curTickProducedInventory})`
+                );
+                console.log(
+                    this.side,
+                    `${this._worstTick.idx} (${wti}) -> ${wtrr} -> ${args.curTickIdx} (${ctpi})`
+                );
+
                 panic(
                     "Should always require more inventory to recover the tick"
                 );
+            }
 
             const missingInventoryToBreakEven = curTickProducedInventory.sub(
                 this._worstTick.inventory
