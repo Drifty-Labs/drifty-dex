@@ -1,20 +1,21 @@
-import { absoluteTickToPrice } from "../logic/utils.ts";
+import { Beacon } from "../logic/beacon.ts";
+import { ECs } from "../logic/ecs.ts";
 
 export type CurTickProps = {
-    base: number;
-    quote: number;
+    base: ECs;
+    quote: ECs;
     widthPx: number;
     idx: number;
 };
 
 export function CurTick(props: CurTickProps) {
-    const quote = () =>
-        props.quote *
-        absoluteTickToPrice(props.idx, "quote", "reserve").toNumber();
-    const max = () => quote() + props.base;
+    const quote = () => props.quote.mul(Beacon.quote().price(props.idx));
+    const max = () => quote().add(props.base);
 
-    const quoteHeight = () => Math.max((quote() * 100) / max(), 1);
-    const baseHeight = () => Math.max((props.base * 100) / max(), 1);
+    const quoteHeight = () =>
+        Math.max((quote().toNumber() * 100) / max().toNumber(), 1);
+    const baseHeight = () =>
+        Math.max((props.base.toNumber() * 100) / max().toNumber(), 1);
 
     return (
         <div

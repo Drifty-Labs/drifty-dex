@@ -1,6 +1,6 @@
-import { E8s } from "./ecs.ts";
+import { BASE_PRICE, ECs, basePriceAbsoluteToTick } from "./ecs.ts";
 import { Pool, type SwapArgs } from "./pool.ts";
-import { BASE_PRICE, panic, priceToTick, type SwapDirection } from "./utils.ts";
+import { panic, type SwapDirection } from "./utils.ts";
 
 export type GenerateTradeArgs = {
     pool: Pool;
@@ -46,8 +46,8 @@ export function generateTrade(args: GenerateTradeArgs): SwapArgs {
             : quoteReserve.div(10);
     const minQtyIn =
         direction === "base -> quote"
-            ? E8s.n(1000).div(E8s.n(93000))
-            : E8s.n(1000);
+            ? ECs.fromString("1000").div(ECs.fromString("93000"))
+            : ECs.fromString("1000");
 
     while (true) {
         const poolCopy = args.pool.clone(true);
@@ -69,7 +69,7 @@ export function generateTrade(args: GenerateTradeArgs): SwapArgs {
 
 export type GenerateNextDayTickOptionsArgs = {
     todayPivotTick: number;
-    todayVolatility: E8s;
+    todayVolatility: ECs;
 };
 
 export type GenerateNextDayTickOptionsResult = {
@@ -98,21 +98,21 @@ export function generateNextDayPivotTick(
 }
 
 export type GenerateTodayVolumeArgs = {
-    avgDailyQuoteVolume: E8s;
+    avgDailyQuoteVolume: ECs;
 };
 
 export type GenerateTodayVolumeResult = {
-    todayTargetQuoteVolume: E8s;
+    todayTargetQuoteVolume: ECs;
 };
 
-export function generateTodayTargetQuoteVolume(avgDailyQuoteVolume: E8s): E8s {
-    return avgDailyQuoteVolume.mul(E8s.random().mul(2));
+export function generateTodayTargetQuoteVolume(avgDailyQuoteVolume: ECs): ECs {
+    return avgDailyQuoteVolume.mul(ECs.random().mul(2));
 }
 
-function volatilityToTickVolatility(vol: E8s): number {
+function volatilityToTickVolatility(vol: ECs): number {
     const leftPrice = BASE_PRICE.clone();
-    const rightPrice = leftPrice.mul(E8s.one().add(vol));
-    const rightTick = priceToTick(rightPrice.toNumber());
+    const rightPrice = leftPrice.mul(ECs.one().add(vol));
+    const rightTick = basePriceAbsoluteToTick(rightPrice);
 
     if (rightTick < 1)
         panic(

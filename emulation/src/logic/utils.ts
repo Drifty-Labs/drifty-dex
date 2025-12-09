@@ -1,33 +1,7 @@
-import { E8s } from "./ecs.ts";
-
 /** The minimum possible tick index. */
 export const MIN_TICK = -887272;
 /** The maximum possible tick index. */
 export const MAX_TICK = 887272;
-
-/** The base price used for calculating tick prices. */
-export const BASE_PRICE = new E8s(1_0001_0000n);
-export const QUOTE_PRICE = BASE_PRICE.inv();
-
-export function priceToTick(price: number) {
-    return Math.floor(Math.log(price) / Math.log(BASE_PRICE.toNumber()));
-}
-
-export function absoluteTickToPrice(
-    absoluteTick: number,
-    side: Side,
-    kind: "reserve" | "inventory"
-): E8s {
-    if (side === "base") {
-        return kind === "reserve"
-            ? BASE_PRICE.pow(absoluteTick)
-            : QUOTE_PRICE.pow(absoluteTick);
-    } else {
-        return kind === "reserve"
-            ? QUOTE_PRICE.pow(absoluteTick)
-            : BASE_PRICE.pow(absoluteTick);
-    }
-}
 
 /**
  * A generic type for representing two-sided objects, such as AMMs for the base and quote assets.
@@ -37,14 +11,26 @@ export type TwoSided<T> = {
     quote: T;
 };
 
+export type TwoAmmSided<T> = {
+    reserve: T;
+    inventory: T;
+};
+
 /**
  * The side of the pool, either `base` or `quote`.
  */
 export type Side = keyof TwoSided<unknown>;
+
+export type AMMSide = keyof TwoAmmSided<unknown>;
+
+export type DriftingStatus = "drifting" | "stable";
+
 /**
  * The direction of a swap, either `base -> quote` or `quote -> base`.
  */
 export type SwapDirection = "base -> quote" | "quote -> base";
+
+export type AMMSwapDirection = "reserve -> inventory" | "inventory -> reserve";
 
 /**
  * A helper function for creating a `TwoSided` object.
@@ -69,4 +55,8 @@ export function panic(msg?: string): never {
 
 export function delay(ms: number) {
     return new Promise((res) => setTimeout(res, ms));
+}
+
+export function xor(a: boolean, b: boolean): boolean {
+    return (!a && b) || (a && !b);
 }

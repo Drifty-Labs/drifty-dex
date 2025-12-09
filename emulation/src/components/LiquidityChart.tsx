@@ -1,7 +1,9 @@
-import { createMemo, createSignal, For, Show } from "solid-js";
+import { createMemo, For, Show } from "solid-js";
 import { type LiquidityDigestAbsolute } from "../logic/pool.ts";
-import { absoluteTickToPrice, type TwoSided } from "../logic/utils.ts";
+import { type TwoSided } from "../logic/utils.ts";
 import { CurTick } from "./CurTick.tsx";
+import { Beacon } from "../logic/beacon.ts";
+import { ECs } from "../logic/ecs.ts";
 
 export type LiquidityChartProps = {
     liquidity: LiquidityDigestAbsolute;
@@ -25,10 +27,13 @@ export function LiquidityChart(props: LiquidityChartProps) {
 
     const maxHeight = createMemo(() => {
         const r = ranges();
-        let maxInvHeight = 0;
+        const rBaseHeight = r.base.reserve?.height ?? 0;
+        const rQuoteHeight = r.quote.reserve?.height ?? 0;
+
+        let maxInvHeight = Math.max(rBaseHeight, rQuoteHeight);
 
         for (const { height } of r.base.oppositeInventory) {
-            const newHeight = height + (r.base.reserve?.height ?? 0);
+            const newHeight = height + rBaseHeight;
 
             if (newHeight > maxInvHeight) {
                 maxInvHeight = newHeight;
@@ -36,7 +41,7 @@ export function LiquidityChart(props: LiquidityChartProps) {
         }
 
         for (const { height } of r.quote.oppositeInventory) {
-            const newHeight = height + (r.quote.reserve?.height ?? 0);
+            const newHeight = height + rQuoteHeight;
 
             if (newHeight > maxInvHeight) {
                 maxInvHeight = newHeight;
@@ -221,7 +226,7 @@ export function LiquidityChart(props: LiquidityChartProps) {
                 : undefined);
 
         return leftTick !== undefined
-            ? absoluteTickToPrice(leftTick, "base", "reserve").toNumber()
+            ? Beacon.base().price(leftTick)
             : undefined;
     };
 
@@ -235,7 +240,7 @@ export function LiquidityChart(props: LiquidityChartProps) {
                 : undefined);
 
         return rightTick !== undefined
-            ? absoluteTickToPrice(rightTick, "base", "reserve").toNumber()
+            ? Beacon.base().price(rightTick)
             : undefined;
     };
 
@@ -251,21 +256,21 @@ export function LiquidityChart(props: LiquidityChartProps) {
                 {quote()}
                 <Show when={leftPrice() !== undefined}>
                     <p class="absolute left-0 bottom-[-2em]">
-                        {(leftPrice() ?? 0).toFixed(2)}
+                        {(leftPrice() ?? 0).toString(2)}
                     </p>
                 </Show>
             </div>
             <CurTick
                 widthPx={curTickWidth()}
-                base={props.liquidity.currentTick.base.toNumber()}
-                quote={props.liquidity.currentTick.quote.toNumber()}
+                base={props.liquidity.currentTick.base}
+                quote={props.liquidity.currentTick.quote}
                 idx={props.liquidity.currentTick.idx}
             />
             <div class="relative">
                 {base()}
                 <Show when={rightPrice() !== undefined}>
                     <p class="absolute right-0 bottom-[-2em]">
-                        {(rightPrice() ?? 0).toFixed(2)}
+                        {(rightPrice() ?? 0).toString(2)}
                     </p>
                 </Show>
             </div>
@@ -282,14 +287,20 @@ function flattenRanges(
                 const r = liquidity.base.reserve;
                 if (!r) return undefined;
 
-                const height = r.qty.toNumber() / r.width;
+                const height = r.getReserveQty().toNumber() / r.getWidth();
 
-                return { left: r.left, right: r.right, height };
+                return { left: r.getLeft(), right: r.getRight(), height };
             })(),
             oppositeInventory: liquidity.quote.inventory.map((it) => {
-                const height = it.qty.toNumber() / it.width;
+                const avgTick = (it.getLeft() + it.getRight()) / 2;
 
-                return { left: it.left, right: it.right, height };
+                const height =
+                    it
+                        .getReserveQty()
+                        .mul(Beacon.quote().price(avgTick))
+                        .toNumber() / it.getWidth();
+
+                return { left: it.getLeft(), right: it.getRight(), height };
             }),
         },
         quote: {
@@ -297,22 +308,20 @@ function flattenRanges(
                 const r = liquidity.quote.reserve;
                 if (!r) return undefined;
 
-                const avgTick = (r.left + r.right) / 2;
-                const qty = r.qty
-                    .mul(absoluteTickToPrice(avgTick, "quote", "reserve"))
+                const avgTick = (r.getLeft() + r.getRight()) / 2;
+                const qty = r
+                    .getReserveQty()
+                    .mul(Beacon.quote().price(avgTick))
                     .toNumber();
-                const height = qty / r.width;
+                const height = qty / r.getWidth();
 
-                return { left: r.left, right: r.right, height };
+                return { left: r.getLeft(), right: r.getRight(), height };
             })(),
             oppositeInventory: liquidity.base.inventory.map((it) => {
-                const avgTick = (it.left + it.right) / 2;
-                const qty = it.qty
-                    .mul(absoluteTickToPrice(avgTick, "quote", "reserve"))
-                    .toNumber();
-                const height = qty / it.width;
+                const qty = it.getReserveQty().toNumber();
+                const height = qty / it.getWidth();
 
-                return { left: it.left, right: it.right, height };
+                return { left: it.getLeft(), right: it.getRight(), height };
             }),
         },
     };

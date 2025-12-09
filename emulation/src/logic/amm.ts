@@ -1,23 +1,16 @@
+import { Beacon } from "./beacon.ts";
 import { CurrentTick } from "./cur-tick.ts";
-import { E8s } from "./ecs.ts";
-import { Liquidity, type WithdrawResult } from "./liquidity.ts";
-import type { InventoryRange, ReserveRange, TakeResult } from "./range.ts";
-import {
-    absoluteTickToPrice,
-    MAX_TICK,
-    MIN_TICK,
-    panic,
-    type Side,
-} from "./utils.ts";
+import { ECs } from "./ecs.ts";
+import { Liquidity } from "./liquidity.ts";
+import { type TakeResult, Range } from "./range.ts";
+import { type TwoAmmSided } from "./utils.ts";
 
 /**
  * Arguments for depositing liquidity into an AMM.
  */
 export type DepositArgs = {
     /** The amount of reserve to deposit. */
-    reserve: E8s;
-    tickSpan?: number;
-    accountDepositedReserve: boolean;
+    reserve: ECs;
 };
 
 /**
@@ -28,7 +21,7 @@ export type WithdrawArgs = {
      * The amount of deposited reserve to withdraw.
      * Should be the same as was really deposited.
      */
-    depositedReserve: E8s;
+    depositedReserve: ECs;
 };
 
 /**
@@ -37,69 +30,45 @@ export type WithdrawArgs = {
 export type LiquidityDigest = {
     curTick: {
         idx: number;
-        reserve: E8s;
-        inventory: E8s;
+        reserve: ECs;
+        inventory: ECs;
     };
     recoveryBin: {
-        collateral: E8s;
+        collateral: ECs;
         worstTick?: TakeResult;
     };
-    reserve?: ReserveRange;
-    inventory: InventoryRange[];
+    reserve?: Range;
+    inventory: Range[];
 };
 
 export class AMM {
-    private _depositedReserve = E8s.zero();
-    private _liquidity: Liquidity;
-    private _currentTick: CurrentTick;
+    private _depositedReserve = ECs.zero();
 
     constructor(
-        private side: Side,
-        private isDrifting: boolean,
-        private noLogs: boolean,
+        private $: Beacon,
+        _getTickSpan: (() => number) | undefined,
         curTickIdx: number,
-        args?: {
-            reserveQty: E8s;
-            inventoryQty: E8s;
-            tickSpan: number; // (tickSpan + 1) === width
-        },
-        liquidity?: Liquidity,
-        currentTick?: CurrentTick
-    ) {
-        this._liquidity = liquidity
-            ? liquidity
-            : new Liquidity(this.side, this.isDrifting, noLogs);
-        this._currentTick = currentTick
-            ? currentTick
-            : new CurrentTick(
-                  this.side,
-                  this.isDrifting,
-                  curTickIdx,
-                  this._liquidity,
-                  noLogs
-              );
+        private _liquidity: Liquidity = new Liquidity(
+            undefined,
+            [],
+            _getTickSpan,
+            $.clone()
+        ),
+        private _currentTick: CurrentTick = new CurrentTick(
+            curTickIdx,
+            _liquidity,
+            $.clone()
+        )
+    ) {}
 
-        if (args) {
-            const respectiveReserve = this._liquidity.init(
-                args.reserveQty.clone(),
-                args.inventoryQty.clone(),
-                curTickIdx,
-                args.tickSpan
-            );
-            this._depositedReserve = args.reserveQty.add(respectiveReserve);
-        }
-    }
-
-    public clone(noLogs: boolean) {
-        const liq = this._liquidity.clone(noLogs);
+    public clone(noLogs: boolean, _getTickSpan: (() => number) | undefined) {
+        const liq = this._liquidity.clone(noLogs, _getTickSpan);
         const ct = this._currentTick.clone(liq, noLogs);
 
         const a = new AMM(
-            this.side,
-            this.isDrifting,
-            noLogs,
-            ct.index,
-            undefined,
+            this.$.clone({ noLogs }),
+            _getTickSpan,
+            ct.getIndex(),
             liq,
             ct
         );
@@ -110,201 +79,95 @@ export class AMM {
     }
 
     public deposit(args: DepositArgs): void {
-        if (!this._liquidity.reserve.isInitted()) {
-            const curTick = this._currentTick.index;
-
-            const tickSpan =
-                args.tickSpan ??
-                (this.isBase()
-                    ? MAX_TICK - (curTick + 1)
-                    : curTick - 1 - MIN_TICK);
-
-            const leftBound = this.isBase()
-                ? curTick + 1
-                : curTick - 1 - tickSpan;
-            const rightBound = this.isBase()
-                ? curTick + 1 + tickSpan
-                : curTick - 1;
-
-            this._liquidity.reserve.init(args.reserve, leftBound, rightBound);
-        } else {
-            this._liquidity.reserve.putUniform(args.reserve);
-        }
-
-        this._liquidity.inventory.notifyReserveChanged();
-
-        if (args.accountDepositedReserve) {
-            this._depositedReserve.addAssign(args.reserve);
-        }
+        this._liquidity.deposit(args.reserve, this._currentTick.getIndex());
+        this._depositedReserve.addAssign(args.reserve);
     }
 
-    public withdraw(args: WithdrawArgs): WithdrawResult {
+    public withdraw(args: WithdrawArgs): TwoAmmSided<ECs> {
         const cut = args.depositedReserve.div(this._depositedReserve);
-        const reserve = E8s.zero();
-        const inventory = E8s.zero();
+        const { reserve: r1, inventory: i1 } = this._liquidity.withdraw(cut);
 
-        if (this._liquidity.reserve.isInitted()) {
-            reserve.addAssign(this._liquidity.reserve.withdrawCut(cut));
-            this._liquidity.inventory.notifyReserveChanged();
-        }
-
-        if (this._currentTick) {
-            const { reserve: r, inventory: i } =
-                this._currentTick.withdrawCut(cut);
-            reserve.addAssign(r);
-            inventory.addAssign(i);
-        }
-
-        if (!this._liquidity.inventory.isEmpty()) {
-            let respectiveReserve =
-                this._liquidity.inventory.respectiveReserve.mul(cut);
-
-            // swapping backwards, which makes early leavers get a worse return, but resolves the IL faster and has better performance
-
-            while (!respectiveReserve.isZero()) {
-                const worstTick = this._liquidity.inventory.takeWorst();
-                if (!worstTick) panic("Worst tick should exist");
-
-                const worstTickRespectiveReserve = worstTick.inventory.mul(
-                    absoluteTickToPrice(worstTick.idx, this.side, "inventory")
-                );
-
-                if (worstTickRespectiveReserve.ge(respectiveReserve)) {
-                    const takeInventory = respectiveReserve.mul(
-                        absoluteTickToPrice(worstTick.idx, this.side, "reserve")
-                    );
-                    worstTick.inventory.subAssign(takeInventory);
-
-                    if (!worstTick.inventory.isZero()) {
-                        this._liquidity.inventory.putWorstNewRange(worstTick);
-                    }
-
-                    inventory.addAssign(takeInventory);
-
-                    break;
-                }
-
-                inventory.addAssign(worstTick.inventory);
-                respectiveReserve.subAssign(worstTickRespectiveReserve);
-
-                if (
-                    !respectiveReserve.isZero() &&
-                    this._liquidity.inventory.isEmpty()
-                ) {
-                    panic(
-                        `Still missing ${respectiveReserve} respective reserve, but the inventory is empty`
-                    );
-                }
-            }
-        }
+        const { reserve: r2, inventory: i2 } =
+            this._currentTick.withdrawCut(cut);
 
         this._depositedReserve.subAssign(args.depositedReserve);
 
-        return { reserve, inventory };
-    }
-
-    public drift(targetLeft: number, tickSpan: number) {
-        if (!this._liquidity.reserve.isInitted()) return;
-
-        const r = this._liquidity.reserve.getRange();
-        if (!r) {
-            this._liquidity.driftReserve(targetLeft);
-            return;
-        }
-
-        const { left, right } = r;
-        if (left === targetLeft) return;
-        if (right - targetLeft + 1 < tickSpan) return;
-
-        /*        console.log(
-            "Drifting",
-            this.side,
-            [left, right],
-            this._liquidity.reserve.getRange()?.width,
-            targetLeft,
-            tickSpan
-        );
- */
-        this._liquidity.driftReserve(targetLeft);
+        return { reserve: r1.add(r2), inventory: i1.add(i2) };
     }
 
     public get currentTick(): CurrentTick {
         return this._currentTick;
     }
 
-    public get worstInventoryTick() {
-        return this._liquidity.inventory.peekWorst();
-    }
-
-    public get bestInventoryTick() {
-        return this._liquidity.inventory.peekBest();
+    public get liquidity(): Liquidity {
+        return this._liquidity;
     }
 
     public get liquidityDigest(): LiquidityDigest {
         return {
             curTick: {
-                idx: this._currentTick.index,
-                ...this._currentTick.getLiquidity(),
+                idx: this._currentTick.getIndex(),
+                reserve: this._currentTick.getCurrentReserve(),
+                inventory: this._currentTick.getCurrentInventory(),
             },
             recoveryBin: {
-                collateral: this._currentTick.getRecoveryBin().collateral,
+                collateral: this._currentTick.getRecoveryBin().getCollateral(),
             },
-            reserve: this._liquidity.reserve.getRange(),
-            inventory: this._liquidity.inventory.getRanges(),
+            reserve: this._liquidity.reserve?.clone(!this.$.isLogging),
+            inventory: this._liquidity.inventory.map((it) =>
+                it.clone(!this.$.isLogging)
+            ),
         };
     }
 
-    public get il(): E8s {
-        if (this._liquidity.inventory.qty.isZero()) {
-            return E8s.zero();
+    public get il(): ECs {
+        if (this._liquidity.inventory.length === 0) {
+            return ECs.zero();
         }
 
-        const leftoverReserve = this._liquidity.reserve.qty;
-
-        const expectedReserve = this._liquidity.inventory.qty.mul(
-            absoluteTickToPrice(this.currentTick.index, this.side, "inventory")
-        );
-
-        const respectiveReserve = this._liquidity.inventory.respectiveReserve;
-
-        return E8s.one().sub(
-            expectedReserve
-                .add(leftoverReserve)
-                .div(respectiveReserve.add(leftoverReserve))
+        return ECs.one().sub(
+            this.getExpectedReserve()
+                .add(this.getActualReserve())
+                .div(this.getRespectiveReserve().add(this.getActualReserve()))
         );
     }
 
-    public get depositedReserve(): E8s {
+    public getDepositedReserve(): ECs {
         return this._depositedReserve.clone();
     }
 
-    public get actualReserve(): E8s {
-        return this._liquidity.reserve.qty.add(
-            this.currentTick.getLiquidity().reserve
+    public getActualReserve(): ECs {
+        return (this._liquidity.reserve?.getReserveQty() ?? ECs.zero()).add(
+            this.currentTick.getCurrentReserve()
         );
     }
 
-    public get actualInventory(): E8s {
-        return this._liquidity.inventory.qty
-            .add(this.currentTick.getLiquidity().inventory)
-            .add(this.currentTick.getRecoveryBin().collateral);
+    public getActualInventory(): ECs {
+        const liquidityInventory = this._liquidity.inventory.reduce(
+            (prev, cur) => prev.add(cur.calcInventoryQty()),
+            ECs.zero()
+        );
+
+        return liquidityInventory.add(this.currentTick.getCurrentInventory());
     }
 
-    public get respectiveReserve(): E8s {
-        return this._liquidity.inventory.respectiveReserve.add(
-            this.currentTick
-                .getLiquidity()
-                .inventory.mul(
-                    absoluteTickToPrice(
-                        this.currentTick.index,
-                        this.side,
-                        "inventory"
-                    )
-                )
+    // if all inventory sold at current price
+    public getExpectedReserve(): ECs {
+        return this.getActualInventory().mul(
+            this.$.price(this.currentTick.getIndex(), "inventory")
         );
     }
 
-    public isBase() {
-        return this.side === "base";
+    public getRespectiveReserve(): ECs {
+        const liquidityRespectiveReserve = this._liquidity.inventory.reduce(
+            (prev, cur) => prev.add(cur.getReserveQty()),
+            ECs.zero()
+        );
+
+        const curTickRespectiveReserve = this.currentTick
+            .getTargetReserve()
+            .sub(this.currentTick.getCurrentReserve());
+
+        return liquidityRespectiveReserve.add(curTickRespectiveReserve);
     }
 }

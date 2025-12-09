@@ -5,22 +5,23 @@ import {
     generateTodayTargetQuoteVolume,
     generateTrade,
 } from "../logic/trade-gen.ts";
-import { absoluteTickToPrice, delay, panic } from "../logic/utils.ts";
+import { delay, panic } from "../logic/utils.ts";
 import { LiquidityChart } from "./LiquidityChart.tsx";
-import { E8s } from "../logic/ecs.ts";
+import { ECs } from "../logic/ecs.ts";
+import { Beacon } from "../logic/beacon.ts";
 
 const CURRENT_TICK = 114445; // 93323 USDC per 1 BTC | 4 Dec 2025
 const INIT_TICKS = 1000; // +-10% around cur price
 
-const BTC_QTY = 100; // from uniswap WBTC/USDT | 4 Dec 2025
-const USD_QTY = 9_000_000; // from uniswap WBTC/USDT | 4 Dec 2025
-const AVG_DAILY_VOLUME = 24_300_000; // from uniswap WBTC/USDT | 4 Dec 2025
-const AVG_DAILY_VOLATILITY = 0.0006666; // ~2% monthly, according to https://bitbo.io/volatility/ | 4 Dec 2025
+const BTC_QTY = "100"; // from uniswap WBTC/USDT | 4 Dec 2025
+const USD_QTY = "9_000_000"; // from uniswap WBTC/USDT | 4 Dec 2025
+const AVG_DAILY_VOLUME = "24_300_000"; // from uniswap WBTC/USDT | 4 Dec 2025
+const AVG_DAILY_VOLATILITY = "0.0006666"; // ~2% monthly, according to https://bitbo.io/volatility/ | 4 Dec 2025
 const UNISWAP_APR = 0.3279; // WBTC/USDT | 4 Dec 2025
 
 let POOL = new Pool(CURRENT_TICK, INIT_TICKS, false, {
-    baseQty: E8s.n(BTC_QTY),
-    quoteQty: E8s.n(USD_QTY),
+    baseQty: ECs.fromString(BTC_QTY),
+    quoteQty: ECs.fromString(USD_QTY),
 });
 
 const ORIGINAL_STATS = POOL.stats;
@@ -35,17 +36,17 @@ export function Simulation() {
 
     const [today, setToday] = createSignal({
         day: 1,
-        quoteVolume: E8s.zero(),
+        quoteVolume: ECs.zero(),
         pivotTick: CURRENT_TICK,
         targetQuoteVolume: generateTodayTargetQuoteVolume(
-            E8s.n(AVG_DAILY_VOLUME)
+            ECs.fromString(AVG_DAILY_VOLUME)
         ),
-        fees: E8s.zero(),
+        fees: ECs.zero(),
     });
 
-    const [_avgSlippage24h, setAvgSlippage24h] = createSignal<E8s[]>([]);
+    const [_avgSlippage24h, setAvgSlippage24h] = createSignal<ECs[]>([]);
 
-    const addSlippage = (slippage: E8s) => {
+    const addSlippage = (slippage: ECs) => {
         setAvgSlippage24h((s) => {
             s.push(slippage);
             return [...s];
@@ -54,16 +55,16 @@ export function Simulation() {
 
     const avgSlippage24h = () => {
         const s100 = _avgSlippage24h();
-        if (s100.length === 0) return E8s.zero();
+        if (s100.length === 0) return ECs.zero();
 
         return s100
-            .reduce((prev, cur) => prev.add(cur), E8s.zero())
+            .reduce((prev, cur) => prev.add(cur), ECs.zero())
             .div(s100.length);
     };
 
-    const [_avgTradeSize24h, setAvgTradeSize24h] = createSignal<E8s[]>([]);
+    const [_avgTradeSize24h, setAvgTradeSize24h] = createSignal<ECs[]>([]);
 
-    const addTradeQuote = (tradeQuote: E8s) => {
+    const addTradeQuote = (tradeQuote: ECs) => {
         setAvgTradeSize24h((t) => {
             t.push(tradeQuote);
             return [...t];
@@ -72,42 +73,42 @@ export function Simulation() {
 
     const avgTradeSize24h = () => {
         const t100 = _avgTradeSize24h();
-        if (t100.length === 0) return E8s.zero();
+        if (t100.length === 0) return ECs.zero();
 
         return t100
-            .reduce((prev, cur) => prev.add(cur), E8s.zero())
+            .reduce((prev, cur) => prev.add(cur), ECs.zero())
             .div(t100.length);
     };
 
-    const [fees29d, setFees29d] = createSignal<E8s[]>([]);
+    const [fees29d, setFees29d] = createSignal<ECs[]>([]);
 
     const avgFees30d = () => {
         const f29d = fees29d();
         const fToday = today().fees;
 
-        if (fToday.isZero() && f29d.length === 0) return E8s.zero();
+        if (fToday.isZero() && f29d.length === 0) return ECs.zero();
 
         return f29d
-            .reduce((prev, cur) => prev.add(cur), E8s.zero())
+            .reduce((prev, cur) => prev.add(cur), ECs.zero())
             .add(fToday)
             .div(f29d.length + (fToday.isZero() ? 0 : 1));
     };
 
-    const [volume29d, setVolume29d] = createSignal<E8s[]>([]);
+    const [volume29d, setVolume29d] = createSignal<ECs[]>([]);
 
     const avgVolume30d = () => {
         const v29d = volume29d();
         const vToday = today().quoteVolume;
 
-        if (vToday.isZero() && v29d.length === 0) return E8s.zero();
+        if (vToday.isZero() && v29d.length === 0) return ECs.zero();
 
         return v29d
-            .reduce((prev, cur) => prev.add(cur), E8s.zero())
+            .reduce((prev, cur) => prev.add(cur), ECs.zero())
             .add(vToday)
             .div(v29d.length + (vToday.isZero() ? 0 : 1));
     };
 
-    const nextDay = (vol: E8s, f: E8s) => {
+    const nextDay = (vol: ECs, f: ECs) => {
         setToday(({ day, quoteVolume, targetQuoteVolume, pivotTick, fees }) => {
             quoteVolume.addAssign(vol);
             fees.addAssign(f);
@@ -136,13 +137,14 @@ export function Simulation() {
             });
 
             day += 1;
-            quoteVolume = E8s.zero();
-            fees = E8s.zero();
+            quoteVolume = ECs.zero();
+            fees = ECs.zero();
             targetQuoteVolume = stats()
                 .quote.actualReserve.add(stats().quote.expectedReserveFromExit)
-                .mul(2.5);
+                .mul(10)
+                .div(4);
             pivotTick = generateNextDayPivotTick({
-                todayVolatility: E8s.n(AVG_DAILY_VOLATILITY),
+                todayVolatility: ECs.fromString(AVG_DAILY_VOLATILITY),
                 todayPivotTick: pivotTick,
             });
 
@@ -168,7 +170,7 @@ export function Simulation() {
             ? _args
             : generateTrade({
                   pool: POOL,
-                  todayVolatility: E8s.n(AVG_DAILY_VOLATILITY),
+                  todayVolatility: ECs.fromString(AVG_DAILY_VOLATILITY),
                   todayPivotTick: t.pivotTick,
               });
 
@@ -177,30 +179,28 @@ export function Simulation() {
         try {
             const quoteVolume =
                 args.direction === "base -> quote"
-                    ? args.qtyIn.mul(
-                          absoluteTickToPrice(
-                              cp.curAbsoluteTick,
-                              "base",
-                              "reserve"
-                          )
-                      )
+                    ? args.qtyIn.mul(Beacon.base().price(cp.curAbsoluteTick))
                     : args.qtyIn.clone();
 
-            const statsBefore = cp.stats;
+            const baseReserveBefore = cp.overallReserve.base;
+            const quoteReserveBefore = cp.overallReserve.quote;
 
             const { qtyOut, feeFactor, feesIn, slippage } = cp.swap(args);
             POOL = cp;
 
+            /*        console.log(
+                `Swap: ${
+                    args.direction === "base -> quote"
+                        ? `${args.qtyIn} BASE -> ${qtyOut} QUOTE`
+                        : `${args.qtyIn} QUOTE -> ${qtyOut} BASE`
+                }; slippage=${slippage}`
+            ); */
+
             const statsAfter = cp.stats;
+            const baseReserveAfter = cp.overallReserve.base;
+            const quoteReserveAfter = cp.overallReserve.quote;
 
-            const baseReserveBefore = statsAfter.base.actualReserve.add(
-                statsAfter.base.respectiveReserve
-            );
-            const baseReserveAfter = statsBefore.base.actualReserve.add(
-                statsBefore.base.respectiveReserve
-            );
-
-            if (!baseReserveBefore.sub(baseReserveAfter).abs().isZero()) {
+            if (baseReserveAfter.lt(baseReserveBefore)) {
                 panic(
                     `Base reserve has decreased! (after - before = ${baseReserveAfter
                         .sub(baseReserveBefore)
@@ -208,14 +208,7 @@ export function Simulation() {
                 );
             }
 
-            const quoteReserveBefore = statsAfter.quote.actualReserve.add(
-                statsAfter.quote.respectiveReserve
-            );
-            const quoteReserveAfter = statsBefore.quote.actualReserve.add(
-                statsBefore.quote.respectiveReserve
-            );
-
-            if (!quoteReserveBefore.sub(quoteReserveAfter).abs().isZero()) {
+            if (quoteReserveAfter.lt(quoteReserveBefore)) {
                 panic(
                     `Quote reserve has decreased! (after - before = ${quoteReserveAfter
                         .sub(quoteReserveBefore)
