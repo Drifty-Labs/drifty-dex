@@ -3,7 +3,7 @@ import { type LiquidityDigestAbsolute } from "../logic/pool.ts";
 import { type TwoSided } from "../logic/utils.ts";
 import { CurTick } from "./CurTick.tsx";
 import { Beacon } from "../logic/beacon.ts";
-import { ECs } from "../logic/ecs.ts";
+import { POOL } from "./Simulation.tsx";
 
 export type LiquidityChartProps = {
     liquidity: LiquidityDigestAbsolute;
@@ -108,6 +108,9 @@ export function LiquidityChart(props: LiquidityChartProps) {
         const bw = baseWidth();
 
         const leftOffset = props.liquidity.currentTick.idx;
+        const resHeight = res
+            ? Math.min(res.height * vf, props.containerHeight / 2)
+            : 0;
 
         return (
             <div
@@ -124,7 +127,7 @@ export function LiquidityChart(props: LiquidityChartProps) {
                                 class="absolute cursor-pointer bg-blue opacity-50 hover:opacity-100"
                                 style={{
                                     left: (it.left - leftOffset) * hf + "px",
-                                    bottom: (res?.height ?? 0) * vf + "px",
+                                    bottom: resHeight + "px",
                                     width: (it.right - it.left + 1) * hf + "px",
                                     height: it.height * vf + "px",
                                     "background-image":
@@ -144,7 +147,7 @@ export function LiquidityChart(props: LiquidityChartProps) {
                             left: (res!.left - leftOffset) * hf + "px",
                             bottom: 0,
                             width: (res!.right - res!.left + 1) * hf + "px",
-                            height: res!.height * vf + "px",
+                            height: resHeight + "px",
                         }}
                         onclick={() => console.log(res)}
                     ></div>
@@ -165,6 +168,9 @@ export function LiquidityChart(props: LiquidityChartProps) {
         const qw = quoteWidth();
 
         const rightOffset = props.liquidity.currentTick.idx;
+        const resHeight = res
+            ? Math.min(res.height * vf, props.containerHeight / 2)
+            : 0;
 
         return (
             <div
@@ -180,7 +186,7 @@ export function LiquidityChart(props: LiquidityChartProps) {
                             const width = (it.right - it.left + 1) * hf;
                             const height = it.height * vf;
                             const right = (rightOffset - it.right) * hf;
-                            const bottom = (res?.height ?? 0) * vf;
+                            const bottom = resHeight;
 
                             return (
                                 <div
@@ -208,7 +214,7 @@ export function LiquidityChart(props: LiquidityChartProps) {
                             right: (rightOffset - res!.right) * hf + "px",
                             bottom: 0,
                             width: (res!.right - res!.left + 1) * hf + "px",
-                            height: res!.height * vf + "px",
+                            height: resHeight + "px",
                         }}
                         onclick={() => console.log(res)}
                     ></div>
@@ -226,7 +232,7 @@ export function LiquidityChart(props: LiquidityChartProps) {
                 : undefined);
 
         return leftTick !== undefined
-            ? Beacon.base().price(leftTick)
+            ? Beacon.base(POOL).price(leftTick)
             : undefined;
     };
 
@@ -240,7 +246,7 @@ export function LiquidityChart(props: LiquidityChartProps) {
                 : undefined);
 
         return rightTick !== undefined
-            ? Beacon.base().price(rightTick)
+            ? Beacon.base(POOL).price(rightTick)
             : undefined;
     };
 
@@ -297,7 +303,7 @@ function flattenRanges(
                 const height =
                     it
                         .getReserveQty()
-                        .mul(Beacon.quote().price(avgTick))
+                        .mul(Beacon.quote(POOL).price(avgTick))
                         .toNumber() / it.getWidth();
 
                 return { left: it.getLeft(), right: it.getRight(), height };
@@ -311,7 +317,7 @@ function flattenRanges(
                 const avgTick = (r.getLeft() + r.getRight()) / 2;
                 const qty = r
                     .getReserveQty()
-                    .mul(Beacon.quote().price(avgTick))
+                    .mul(Beacon.quote(POOL).price(avgTick))
                     .toNumber();
                 const height = qty / r.getWidth();
 

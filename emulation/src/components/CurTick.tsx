@@ -1,5 +1,6 @@
 import { Beacon } from "../logic/beacon.ts";
 import { ECs } from "../logic/ecs.ts";
+import { POOL } from "./Simulation.tsx";
 
 export type CurTickProps = {
     base: ECs;
@@ -9,7 +10,7 @@ export type CurTickProps = {
 };
 
 export function CurTick(props: CurTickProps) {
-    const quote = () => props.quote.mul(Beacon.quote().price(props.idx));
+    const quote = () => props.quote.mul(Beacon.quote(POOL).price(props.idx));
     const max = () => quote().add(props.base);
 
     const quoteHeight = () =>

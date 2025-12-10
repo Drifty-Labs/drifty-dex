@@ -2,6 +2,7 @@ import { Beacon } from "./beacon.ts";
 import { CurrentTick } from "./cur-tick.ts";
 import { ECs } from "./ecs.ts";
 import { Liquidity } from "./liquidity.ts";
+import { Pool } from "./pool.ts";
 import { type TakeResult, Range } from "./range.ts";
 import { type TwoAmmSided } from "./utils.ts";
 
@@ -61,12 +62,16 @@ export class AMM {
         )
     ) {}
 
-    public clone(noLogs: boolean, _getTickSpan: (() => number) | undefined) {
-        const liq = this._liquidity.clone(noLogs, _getTickSpan);
-        const ct = this._currentTick.clone(liq, noLogs);
+    public clone(
+        pool: Pool,
+        noLogs: boolean,
+        _getTickSpan: (() => number) | undefined
+    ) {
+        const liq = this._liquidity.clone(pool, noLogs, _getTickSpan);
+        const ct = this._currentTick.clone(pool, liq, noLogs);
 
         const a = new AMM(
-            this.$.clone({ noLogs }),
+            this.$.clone({ noLogs, pool }),
             _getTickSpan,
             ct.getIndex(),
             liq,
@@ -113,9 +118,12 @@ export class AMM {
             recoveryBin: {
                 collateral: this._currentTick.getRecoveryBin().getCollateral(),
             },
-            reserve: this._liquidity.reserve?.clone(!this.$.isLogging),
+            reserve: this._liquidity.reserve?.clone(
+                this.$.pool,
+                !this.$.isLogging
+            ),
             inventory: this._liquidity.inventory.map((it) =>
-                it.clone(!this.$.isLogging)
+                it.clone(this.$.pool, !this.$.isLogging)
             ),
         };
     }

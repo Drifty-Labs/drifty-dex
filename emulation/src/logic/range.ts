@@ -1,5 +1,6 @@
 import { Beacon } from "./beacon.ts";
 import { BASE_PRICE, ECs } from "./ecs.ts";
+import { Pool } from "./pool.ts";
 import { panic } from "./utils.ts";
 
 /**
@@ -24,7 +25,7 @@ export class Range {
                     }] The range has to stay uniform: perTick=${this.getPerTickReserveQty()}, putting=${reserveQty}`
                 );
         }
-        this._reserveQty.addAssign(this.getPerTickReserveQty());
+        this._reserveQty.addAssign(reserveQty);
 
         if (this.$.isBase) {
             if (this.$.isReserve) this._left -= 1;
@@ -209,12 +210,12 @@ export class Range {
         private $: Beacon
     ) {}
 
-    public clone(noLogs: boolean) {
+    public clone(pool: Pool, noLogs: boolean) {
         return new Range(
             this.getReserveQty(),
             this.getLeft(),
             this.getRight(),
-            this.$.clone({ noLogs })
+            this.$.clone({ noLogs, pool })
         );
     }
 
@@ -322,7 +323,7 @@ export class Range {
     }
 
     protected assertBoundsOk() {
-        if (this.getRight < this.getLeft)
+        if (this.getRight() < this.getLeft())
             panic(
                 `[Range ${
                     this.$

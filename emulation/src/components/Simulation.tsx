@@ -10,16 +10,16 @@ import { LiquidityChart } from "./LiquidityChart.tsx";
 import { ECs } from "../logic/ecs.ts";
 import { Beacon } from "../logic/beacon.ts";
 
-const CURRENT_TICK = 114445; // 93323 USDC per 1 BTC | 4 Dec 2025
+export const CURRENT_TICK = 114445; // 93323 USDC per 1 BTC | 4 Dec 2025
 const INIT_TICKS = 1000; // +-10% around cur price
 
 const BTC_QTY = "100"; // from uniswap WBTC/USDT | 4 Dec 2025
 const USD_QTY = "9_000_000"; // from uniswap WBTC/USDT | 4 Dec 2025
 const AVG_DAILY_VOLUME = "24_300_000"; // from uniswap WBTC/USDT | 4 Dec 2025
-const AVG_DAILY_VOLATILITY = "0.0006666"; // ~2% monthly, according to https://bitbo.io/volatility/ | 4 Dec 2025
+const AVG_DAILY_VOLATILITY = "0.1"; // ~30% monthly
 const UNISWAP_APR = 0.3279; // WBTC/USDT | 4 Dec 2025
 
-let POOL = new Pool(CURRENT_TICK, INIT_TICKS, false, {
+export let POOL = new Pool(CURRENT_TICK, INIT_TICKS, false, {
     baseQty: ECs.fromString(BTC_QTY),
     quoteQty: ECs.fromString(USD_QTY),
 });
@@ -27,12 +27,15 @@ let POOL = new Pool(CURRENT_TICK, INIT_TICKS, false, {
 const ORIGINAL_STATS = POOL.stats;
 
 export function Simulation() {
+    const [avgDailyVolatility, setAvgDailyVolatility] = createSignal(
+        ECs.fromString(AVG_DAILY_VOLATILITY)
+    );
     const [liquidity, setLiquidity] = createSignal(POOL.liquidityDigest);
     const [stats, setStats] = createSignal(ORIGINAL_STATS);
     const [il, setIl] = createSignal(POOL.il);
     const [feeFactor, setFeeFactor] = createSignal(POOL.feeFactor);
 
-    const [isRunning, setRunning] = createSignal(true);
+    const [isRunning, setRunning] = createSignal(false);
 
     const [today, setToday] = createSignal({
         day: 1,
@@ -144,7 +147,7 @@ export function Simulation() {
                 .mul(10)
                 .div(4);
             pivotTick = generateNextDayPivotTick({
-                todayVolatility: ECs.fromString(AVG_DAILY_VOLATILITY),
+                todayVolatility: avgDailyVolatility(),
                 todayPivotTick: pivotTick,
             });
 
@@ -170,7 +173,7 @@ export function Simulation() {
             ? _args
             : generateTrade({
                   pool: POOL,
-                  todayVolatility: ECs.fromString(AVG_DAILY_VOLATILITY),
+                  todayVolatility: avgDailyVolatility(),
                   todayPivotTick: t.pivotTick,
               });
 
@@ -179,7 +182,7 @@ export function Simulation() {
         try {
             const quoteVolume =
                 args.direction === "base -> quote"
-                    ? args.qtyIn.mul(Beacon.base().price(cp.curAbsoluteTick))
+                    ? args.qtyIn.mul(Beacon.base(cp).price(cp.curAbsoluteTick))
                     : args.qtyIn.clone();
 
             const baseReserveBefore = cp.overallReserve.base;
@@ -187,14 +190,6 @@ export function Simulation() {
 
             const { qtyOut, feeFactor, feesIn, slippage } = cp.swap(args);
             POOL = cp;
-
-            /*        console.log(
-                `Swap: ${
-                    args.direction === "base -> quote"
-                        ? `${args.qtyIn} BASE -> ${qtyOut} QUOTE`
-                        : `${args.qtyIn} QUOTE -> ${qtyOut} BASE`
-                }; slippage=${slippage}`
-            ); */
 
             const statsAfter = cp.stats;
             const baseReserveAfter = cp.overallReserve.base;
@@ -236,7 +231,12 @@ export function Simulation() {
 
         while (true) {
             if (isRunning()) {
-                swap();
+                try {
+                    swap();
+                } catch (e) {
+                    setRunning(false);
+                    throw e;
+                }
             }
 
             await delay(10);
@@ -289,13 +289,24 @@ export function Simulation() {
                 >
                     {isRunning() ? "Stop" : "Start"}
                 </button>
-                <button
-                    type="submit"
-                    class="bg-white text-black"
-                    onclick={() => console.log(POOL.clone(true))}
-                >
-                    Pool State
-                </button>
+                <div class="flex flex-row gap-2">
+                    <div class="flex flex-col gap-2">
+                        <p>Volatility (24h)</p>
+                        <input
+                            type="range"
+                            min={0.001}
+                            max={0.5}
+                            step={0.001}
+                            value={avgDailyVolatility().toNumber()}
+                            onchange={(e) =>
+                                setAvgDailyVolatility(
+                                    ECs.fromString(e.currentTarget.value)
+                                )
+                            }
+                        />
+                    </div>
+                    <p>{avgDailyVolatility().mul(100).toString(2)}%</p>
+                </div>
             </div>
 
             <div class="flex flex-col gap-y-10">
@@ -307,6 +318,14 @@ export function Simulation() {
                     </p>
                     <p>
                         Daily Fees (avg. 30d): ${avgFees30d().toShortString()}
+                    </p>
+                    <p>
+                        APR (avg. 30d):{" "}
+                        {avgFees30d()
+                            .div(POOL.tvlQuote)
+                            .mul(100 * 365)
+                            .toShortString()}
+                        %
                     </p>
                     <p>
                         Fee % (real-time): {feeFactor().mul(100).toString(2)}%

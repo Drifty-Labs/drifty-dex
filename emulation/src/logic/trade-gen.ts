@@ -1,3 +1,4 @@
+import { CURRENT_TICK } from "../components/Simulation.tsx";
 import { BASE_PRICE, ECs, basePriceAbsoluteToTick } from "./ecs.ts";
 import { Pool, type SwapArgs } from "./pool.ts";
 import { panic, type SwapDirection } from "./utils.ts";
@@ -14,14 +15,17 @@ export function generateTrade(args: GenerateTradeArgs): SwapArgs {
     });
 
     let direction: SwapDirection | undefined = undefined;
+    let w: number;
 
     if (curTick < left || curTick > right) {
         if (curTick < left) {
             direction = "quote -> base";
             left = curTick;
+            w = right - left + 1;
         } else {
             direction = "base -> quote";
             right = curTick;
+            w = right - left + 1;
         }
     } else {
         const width = right - left + 1;
@@ -30,32 +34,31 @@ export function generateTrade(args: GenerateTradeArgs): SwapArgs {
 
         const r = Math.random();
         direction = r <= quoteP ? "base -> quote" : "quote -> base";
-    }
 
-    const stats = args.pool.stats;
-    const baseReserve = stats.base.actualReserve.add(
-        stats.base.expectedReserveFromExit
-    );
-    const quoteReserve = stats.quote.actualReserve.add(
-        stats.quote.expectedReserveFromExit
-    );
+        if (direction === "base -> quote") {
+            w = quoteWidth;
+        } else {
+            w = right - curTick + 1;
+        }
+    }
 
     let qtyIn =
         direction === "base -> quote"
-            ? baseReserve.div(10)
-            : quoteReserve.div(10);
+            ? ECs.fromString("0.1")
+            : ECs.fromString("10000");
+
     const minQtyIn =
         direction === "base -> quote"
-            ? ECs.fromString("1000").div(ECs.fromString("93000"))
-            : ECs.fromString("1000");
+            ? ECs.fromString("0.001")
+            : ECs.fromString("100");
 
     while (true) {
-        const poolCopy = args.pool.clone(true);
+        const priceChange = args.pool.estimatePriceImpactTicks({
+            direction,
+            qtyIn,
+        });
+        if (priceChange <= w) break;
 
-        poolCopy.swap({ direction, qtyIn });
-        const nextTick = poolCopy.curAbsoluteTick;
-
-        if (nextTick >= left && nextTick <= right) break;
         qtyIn.divAssign(2);
 
         if (qtyIn.lt(minQtyIn)) {
@@ -93,8 +96,18 @@ export function generateNextDayPivotTick(
 ): number {
     const { left, right } = generateNextDayPivotTickOptions(args);
 
+    if (left <= CURRENT_TICK && right >= CURRENT_TICK) {
+        const r = Math.random();
+        return r < 0.5 ? left : right;
+    }
+
+    if (left > CURRENT_TICK) {
+        const r = Math.random();
+        return r < 0.99 ? left : right;
+    }
+
     const r = Math.random();
-    return r < 0.5 ? left : right;
+    return r < 0.99 ? right : left;
 }
 
 export type GenerateTodayVolumeArgs = {

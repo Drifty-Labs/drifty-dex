@@ -1,5 +1,6 @@
 import { Beacon } from "./beacon.ts";
 import { ECs } from "./ecs.ts";
+import { Pool } from "./pool.ts";
 import { Range, type TakeResult } from "./range.ts";
 import {
     type AMMSwapDirection,
@@ -18,8 +19,6 @@ export class Liquidity {
         if (direction === "reserve -> inventory") {
             if (this.reserve) {
                 this.reserve.putBestUniform(fromCurTick.reserveQty);
-
-                this._shouldCreateNewInventoryRange = true;
             } else {
                 this.deposit(fromCurTick.reserveQty, fromCurTick.tickIdx);
             }
@@ -63,7 +62,10 @@ export class Liquidity {
                 tickIdx: tickBefore.tickIdx,
             });
 
-            if (!res) break;
+            if (!res) {
+                this.putWorstInventoryTick(tickBefore);
+                break;
+            }
 
             const { leftoverReserveQty, curTickIdx } = res;
 
@@ -83,10 +85,7 @@ export class Liquidity {
                     tickIdx: tickBefore.tickIdx,
                 };
 
-                this.putWorstInventoryTick(
-                    tickAfter,
-                    !tickBefore.reserveQty.eq(tickAfter.reserveQty)
-                );
+                this.putWorstInventoryTick(tickAfter);
                 break;
             }
         }
@@ -94,11 +93,12 @@ export class Liquidity {
 
     public driftReserveWorst(newWorst: number) {
         if (!this.reserve) return;
+
         const tickSpan = this._getTickSpan ? this._getTickSpan() : undefined;
         if (!tickSpan) return;
 
         try {
-            const cp = this.reserve.clone(!this.$.isLogging);
+            const cp = this.reserve.clone(this.$.pool, !this.$.isLogging);
             cp.driftReserveWorst(newWorst);
 
             if (cp.getWidth() < tickSpan) return;
@@ -131,8 +131,6 @@ export class Liquidity {
                 this.$.clone({ ammSide: "reserve" })
             );
         }
-
-        this._shouldCreateNewInventoryRange = true;
     }
 
     public withdraw(cut: ECs): TwoAmmSided<ECs> {
@@ -150,7 +148,14 @@ export class Liquidity {
         return { reserve, inventory };
     }
 
-    private _shouldCreateNewInventoryRange: boolean = true;
+    public getInventoryWidth() {
+        if (this._inventory.length === 0) return 0;
+
+        const left = this._inventory[0].getLeft();
+        const right = this._inventory[this._inventory.length - 1].getRight();
+
+        return right - left + 1;
+    }
 
     constructor(
         private _reserve: Range | undefined,
@@ -159,12 +164,16 @@ export class Liquidity {
         private $: Beacon
     ) {}
 
-    public clone(noLogs: boolean, _getTickSpan: (() => number) | undefined) {
+    public clone(
+        pool: Pool,
+        noLogs: boolean,
+        _getTickSpan: (() => number) | undefined
+    ) {
         return new Liquidity(
-            this._reserve?.clone(noLogs),
-            this._inventory.map((it) => it.clone(noLogs)),
+            this._reserve?.clone(pool, noLogs),
+            this._inventory.map((it) => it.clone(pool, noLogs)),
             _getTickSpan,
-            this.$.clone({ noLogs })
+            this.$.clone({ noLogs, pool })
         );
     }
 
@@ -198,11 +207,7 @@ export class Liquidity {
 
         let range: Range;
 
-        if (
-            this._inventory.length === 0 ||
-            this._shouldCreateNewInventoryRange
-        ) {
-            this._shouldCreateNewInventoryRange = false;
+        if (this._inventory.length === 0) {
             range = new Range(
                 tick.reserveQty,
                 tick.tickIdx,
@@ -210,9 +215,20 @@ export class Liquidity {
                 this.$.clone({ ammSide: "inventory" })
             );
         } else {
-            range = this.takeBestInventoryRange()!;
-            if (!range) panic();
-            range.putBest(tick.reserveQty);
+            range = this.takeBestInventoryRange() ?? panic();
+
+            if (range.getPerTickReserveQty().eq(tick.reserveQty)) {
+                range.putBest(tick.reserveQty);
+            } else {
+                this.putBestInventoryRange(range);
+
+                range = new Range(
+                    tick.reserveQty,
+                    tick.tickIdx,
+                    tick.tickIdx,
+                    this.$.clone({ ammSide: "inventory" })
+                );
+            }
         }
 
         this.putBestInventoryRange(range);
@@ -230,12 +246,12 @@ export class Liquidity {
         return tick;
     }
 
-    private putWorstInventoryTick(tick: TakeResult, newRange: boolean) {
+    private putWorstInventoryTick(tick: TakeResult) {
         if (tick.reserveQty.isZero()) return;
 
         let range: Range;
 
-        if (this._inventory.length === 0 || newRange) {
+        if (this._inventory.length === 0) {
             range = new Range(
                 tick.reserveQty,
                 tick.tickIdx,
@@ -243,9 +259,19 @@ export class Liquidity {
                 this.$.clone({ ammSide: "inventory" })
             );
         } else {
-            range = this.takeWorstInventoryRange()!;
-            if (!range) panic();
-            range.putWorst(tick.reserveQty);
+            range = this.takeWorstInventoryRange() ?? panic();
+
+            if (range.getPerTickReserveQty().eq(tick.reserveQty)) {
+                range.putWorst(tick.reserveQty);
+            } else {
+                this.putWorstInventoryRange(range);
+                range = new Range(
+                    tick.reserveQty,
+                    tick.tickIdx,
+                    tick.tickIdx,
+                    this.$.clone({ ammSide: "inventory" })
+                );
+            }
         }
 
         this.putWorstInventoryRange(range);

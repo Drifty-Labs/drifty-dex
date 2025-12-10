@@ -219,4 +219,5 @@ Deno.test("priceToTick", () => {
     assertEquals(basePriceAbsoluteToTick(ECs.one()), 0);
     assertEquals(basePriceAbsoluteToTick(BASE_PRICE), 1);
     assertEquals(basePriceAbsoluteToTick(BASE_PRICE.pow(10)), 10);
+    assertEquals(basePriceAbsoluteToTick(BASE_PRICE.pow(10000)), 10000);
 });

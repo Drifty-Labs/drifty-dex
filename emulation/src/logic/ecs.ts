@@ -366,12 +366,13 @@ export function basePriceAbsoluteToTick(price: ECs): number {
         right = price.lt(ECs.one()) ? -1 : MAX_TICK;
 
     while (true) {
-        const mid = (left + right) / 2;
+        const mid = Math.floor((left + right) / 2);
+
         const t = BASE_PRICE.pow(mid);
 
         if (t.eq(price)) return mid;
-        if (right - left <= 1) return mid;
-        if (t.lt(price)) {
+        if (Math.abs(right - left) <= 1) return mid;
+        if (t.gt(price)) {
             right = mid;
         } else {
             left = mid;

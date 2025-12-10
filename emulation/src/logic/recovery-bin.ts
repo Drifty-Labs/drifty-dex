@@ -1,6 +1,7 @@
 import { Beacon } from "./beacon.ts";
 import { ECs } from "./ecs.ts";
 import { Liquidity } from "./liquidity.ts";
+import { Pool } from "./pool.ts";
 import { panic } from "./utils.ts";
 
 export type RecoverArgs = {
@@ -21,8 +22,8 @@ export class RecoveryBin {
 
     constructor(private liquidity: Liquidity, private $: Beacon) {}
 
-    public clone(newLiquidity: Liquidity, noLogs: boolean) {
-        const r = new RecoveryBin(newLiquidity, this.$.clone({ noLogs }));
+    public clone(pool: Pool, newLiquidity: Liquidity, noLogs: boolean) {
+        const r = new RecoveryBin(newLiquidity, this.$.clone({ noLogs, pool }));
 
         r._collateral = this._collateral.clone();
 

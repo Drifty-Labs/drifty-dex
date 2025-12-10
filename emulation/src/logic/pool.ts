@@ -8,6 +8,7 @@ import {
     type AMMSwapDirection,
 } from "./utils.ts";
 import { Range } from "./range.ts";
+import { POOL } from "../components/Simulation.tsx";
 
 const STABLE_AMM_CUT = ECs.fromString("0.05");
 const MIN_FEES = ECs.fromString("0.0001");
@@ -47,8 +48,16 @@ export class Pool {
             const stableQuoteShare = args.quoteQty.mul(STABLE_AMM_CUT);
 
             this.stableAMM = {
-                base: new AMM(Beacon.base("stable"), undefined, curTickIdx),
-                quote: new AMM(Beacon.quote("stable"), undefined, curTickIdx),
+                base: new AMM(
+                    Beacon.base(this, "stable"),
+                    undefined,
+                    curTickIdx
+                ),
+                quote: new AMM(
+                    Beacon.quote(this, "stable"),
+                    undefined,
+                    curTickIdx
+                ),
             };
 
             this.stableAMM.base.deposit({
@@ -64,9 +73,13 @@ export class Pool {
             const getTickSpan = () => this.tickSpan;
 
             this.driftingAMM = {
-                base: new AMM(Beacon.base("drifting"), getTickSpan, curTickIdx),
+                base: new AMM(
+                    Beacon.base(this, "drifting"),
+                    getTickSpan,
+                    curTickIdx
+                ),
                 quote: new AMM(
-                    Beacon.quote("drifting"),
+                    Beacon.quote(this, "drifting"),
                     getTickSpan,
                     curTickIdx
                 ),
@@ -76,16 +89,28 @@ export class Pool {
             this.driftingAMM.quote.deposit({ reserve: driftingQuoteShare });
         } else {
             this.stableAMM = {
-                base: new AMM(Beacon.base("stable"), undefined, curTickIdx),
-                quote: new AMM(Beacon.quote("stable"), undefined, curTickIdx),
+                base: new AMM(
+                    Beacon.base(this, "stable"),
+                    undefined,
+                    curTickIdx
+                ),
+                quote: new AMM(
+                    Beacon.quote(this, "stable"),
+                    undefined,
+                    curTickIdx
+                ),
             };
 
             const getTickSpan = () => this.tickSpan;
 
             this.driftingAMM = {
-                base: new AMM(Beacon.base("drifting"), getTickSpan, curTickIdx),
+                base: new AMM(
+                    Beacon.base(this, "drifting"),
+                    getTickSpan,
+                    curTickIdx
+                ),
                 quote: new AMM(
-                    Beacon.quote("drifting"),
+                    Beacon.quote(this, "drifting"),
                     getTickSpan,
                     curTickIdx
                 ),
@@ -93,7 +118,9 @@ export class Pool {
         }
     }
 
-    public clone(noLogs: boolean) {
+    public clone(noLogs?: boolean) {
+        noLogs = noLogs ?? this.noLogs;
+
         const p = new Pool(
             this.driftingAMM.quote.currentTick.getIndex(),
             this.tickSpan,
@@ -102,11 +129,19 @@ export class Pool {
 
         const getTickSpan = () => p.tickSpan;
 
-        p.stableAMM.base = this.stableAMM.base.clone(noLogs, undefined);
-        p.stableAMM.quote = this.stableAMM.quote.clone(noLogs, undefined);
+        p.stableAMM.base = this.stableAMM.base.clone(p, noLogs, undefined);
+        p.stableAMM.quote = this.stableAMM.quote.clone(p, noLogs, undefined);
 
-        p.driftingAMM.base = this.driftingAMM.base.clone(noLogs, getTickSpan);
-        p.driftingAMM.quote = this.driftingAMM.quote.clone(noLogs, getTickSpan);
+        p.driftingAMM.base = this.driftingAMM.base.clone(
+            p,
+            noLogs,
+            getTickSpan
+        );
+        p.driftingAMM.quote = this.driftingAMM.quote.clone(
+            p,
+            noLogs,
+            getTickSpan
+        );
 
         return p;
     }
@@ -283,7 +318,116 @@ export class Pool {
         const { base: bf, quote: qf } = this.il;
         const { base: bw, quote: qw } = this.driftingReserveWidth;
 
-        return this.calculateFees(bf.add(qf).div(2), bw.add(qw).div(2));
+        return this.calculateFees(bf.add(qf).div(2), bw.add(qw).div(4));
+    }
+
+    public estimatePriceImpactTicks(args: SwapArgs): number {
+        let expectedOut: ECs;
+        let drifting: { width: number; qty: ECs };
+        let stable: { width: number; qty: ECs };
+
+        if (args.direction === "base -> quote") {
+            expectedOut = args.qtyIn.mul(
+                Beacon.base(this).price(this.curAbsoluteTick)
+            );
+
+            drifting = {
+                width: Math.max(
+                    this.driftingAMM.quote.liquidity.reserve?.getWidth() ?? 0,
+                    this.driftingAMM.base.liquidity.getInventoryWidth()
+                ),
+                qty: (
+                    this.driftingAMM.quote.liquidity.reserve?.getReserveQty() ??
+                    ECs.zero()
+                )
+                    .add(
+                        this.driftingAMM.base.liquidity.inventory.reduce(
+                            (prev, cur) => prev.add(cur.calcInventoryQty()),
+                            ECs.zero()
+                        )
+                    )
+                    .add(
+                        this.driftingAMM.quote.currentTick.getCurrentReserve()
+                    ),
+            };
+
+            stable = {
+                width: this.stableAMM.quote.liquidity.reserve!.getWidth(),
+                qty: (
+                    this.stableAMM.quote.liquidity.reserve?.getReserveQty() ??
+                    ECs.zero()
+                )
+                    .add(
+                        this.stableAMM.base.liquidity.inventory.reduce(
+                            (prev, cur) => prev.add(cur.calcInventoryQty()),
+                            ECs.zero()
+                        )
+                    )
+                    .add(this.stableAMM.quote.currentTick.getCurrentReserve()),
+            };
+        } else {
+            expectedOut = args.qtyIn.mul(
+                Beacon.quote(this).price(this.curAbsoluteTick)
+            );
+
+            drifting = {
+                width: Math.max(
+                    this.driftingAMM.base.liquidity.reserve?.getWidth() ?? 0,
+                    this.driftingAMM.quote.liquidity.getInventoryWidth()
+                ),
+                qty: (
+                    this.driftingAMM.base.liquidity.reserve?.getReserveQty() ??
+                    ECs.zero()
+                )
+                    .add(
+                        this.driftingAMM.quote.liquidity.inventory.reduce(
+                            (prev, cur) => prev.add(cur.calcInventoryQty()),
+                            ECs.zero()
+                        )
+                    )
+                    .add(this.driftingAMM.base.currentTick.getCurrentReserve()),
+            };
+
+            stable = {
+                width: this.stableAMM.base.liquidity.reserve!.getWidth(),
+                qty: (
+                    this.stableAMM.base.liquidity.reserve?.getReserveQty() ??
+                    ECs.zero()
+                )
+                    .add(
+                        this.stableAMM.quote.liquidity.inventory.reduce(
+                            (prev, cur) => prev.add(cur.calcInventoryQty()),
+                            ECs.zero()
+                        )
+                    )
+                    .add(this.stableAMM.base.currentTick.getCurrentReserve()),
+            };
+        }
+
+        const stablePerTickQty = stable.qty.div(stable.width);
+        const driftingPerTickQty =
+            drifting.width > 0
+                ? drifting.qty.div(drifting.width).add(stablePerTickQty)
+                : ECs.zero();
+
+        const driftingConsumedTicks =
+            drifting.width > 0
+                ? Math.ceil(expectedOut.div(driftingPerTickQty).toNumber())
+                : 0;
+
+        if (driftingConsumedTicks <= drifting.width)
+            return driftingConsumedTicks;
+
+        expectedOut.subAssign(drifting.qty);
+
+        const stableConsumedTicks = Math.ceil(
+            expectedOut.div(stablePerTickQty).toNumber()
+        );
+
+        if (stableConsumedTicks <= stable.width)
+            return driftingConsumedTicks + stableConsumedTicks;
+
+        panic("Too big price impact");
     }
 
     private calculateFees(il: ECs, width: ECs): ECs {
@@ -384,6 +528,14 @@ export class Pool {
         return { base, quote };
     }
 
+    public get tvlQuote(): ECs {
+        const { base, quote } = this.overallReserve;
+
+        return quote.add(
+            base.mul(Beacon.base(this).price(this.curAbsoluteTick))
+        );
+    }
+
     public get stats(): TwoSided<Stats> {
         const actualBaseInv = this.driftingAMM.base
             .getActualInventory()
@@ -403,6 +555,14 @@ export class Pool {
             expectedReserveFromExit: actualBaseInv.mul(
                 absoluteTickToPrice(this.curAbsoluteTick, "base", "inventory")
             ),
+            collateral: this.driftingAMM.base.currentTick
+                .getRecoveryBin()
+                .getCollateral()
+                .add(
+                    this.stableAMM.base.currentTick
+                        .getRecoveryBin()
+                        .getCollateral()
+                ),
         };
 
         const actualQuoteInv = this.driftingAMM.quote
@@ -423,6 +583,14 @@ export class Pool {
             expectedReserveFromExit: actualQuoteInv.mul(
                 absoluteTickToPrice(this.curAbsoluteTick, "quote", "inventory")
             ),
+            collateral: this.driftingAMM.quote.currentTick
+                .getRecoveryBin()
+                .getCollateral()
+                .add(
+                    this.stableAMM.quote.currentTick
+                        .getRecoveryBin()
+                        .getCollateral()
+                ),
         };
 
         return { base, quote };
@@ -435,6 +603,7 @@ export type Stats = {
     actualInventory: ECs;
     respectiveReserve: ECs;
     expectedReserveFromExit: ECs;
+    collateral: ECs;
 };
 
 export type LiquidityDigestAbsolute = {

@@ -1,6 +1,7 @@
 import { Beacon } from "./beacon.ts";
 import { ECs } from "./ecs.ts";
 import { Liquidity } from "./liquidity.ts";
+import { Pool } from "./pool.ts";
 import { type TakeResult } from "./range.ts";
 import { RecoveryBin } from "./recovery-bin.ts";
 import { type AMMSwapDirection, panic, type TwoAmmSided } from "./utils.ts";
@@ -29,16 +30,16 @@ export class CurrentTick {
         this._recoveryBin = new RecoveryBin(this.liquidity, this.$.clone());
     }
 
-    public clone(newLiquidity: Liquidity, noLogs: boolean) {
+    public clone(pool: Pool, newLiquidity: Liquidity, noLogs: boolean) {
         const c = new CurrentTick(
             this._index,
             newLiquidity,
-            this.$.clone({ noLogs })
+            this.$.clone({ noLogs, pool })
         );
 
         c._targetReserve = this._targetReserve.clone();
         c._currentReserve = this._currentReserve.clone();
-        c._recoveryBin = this._recoveryBin.clone(newLiquidity, noLogs);
+        c._recoveryBin = this._recoveryBin.clone(pool, newLiquidity, noLogs);
 
         return c;
     }

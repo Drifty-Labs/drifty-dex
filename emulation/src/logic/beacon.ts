@@ -1,4 +1,5 @@
 import { absoluteTickToPrice } from "./ecs.ts";
+import { Pool } from "./pool.ts";
 import {
     type AMMSide,
     type DriftingStatus,
@@ -11,29 +12,34 @@ export class Beacon {
     protected _ammSide: AMMSide | undefined;
     protected _driftingStatus: DriftingStatus;
     protected _noLogs: boolean;
+    protected _pool: Pool;
 
     public static base(
+        pool: Pool,
         driftingStatus: DriftingStatus = "stable",
         ammSide: AMMSide | undefined = undefined,
         noLogs: boolean = false
     ) {
-        return new Beacon("base", ammSide, driftingStatus, noLogs);
+        return new Beacon(pool, "base", ammSide, driftingStatus, noLogs);
     }
 
     public static quote(
+        pool: Pool,
         driftingStatus: DriftingStatus = "stable",
         ammSide: AMMSide | undefined = undefined,
         noLogs: boolean = false
     ) {
-        return new Beacon("quote", ammSide, driftingStatus, noLogs);
+        return new Beacon(pool, "quote", ammSide, driftingStatus, noLogs);
     }
 
     constructor(
+        pool: Pool,
         side: Side,
         ammSide: AMMSide | undefined,
         driftingStatus: DriftingStatus,
         noLogs?: boolean
     ) {
+        this._pool = pool;
         this._side = side;
         this._ammSide = ammSide;
         this._driftingStatus = driftingStatus;
@@ -41,12 +47,14 @@ export class Beacon {
     }
 
     public clone(args?: {
+        pool?: Pool;
         side?: Side;
         ammSide?: AMMSide;
         driftingStatus?: DriftingStatus;
         noLogs?: boolean;
     }) {
         return new Beacon(
+            args?.pool ?? this.pool,
             args?.side ?? this._side,
             args?.ammSide ?? this._ammSide,
             args?.driftingStatus ?? this._driftingStatus,
@@ -83,5 +91,9 @@ export class Beacon {
 
     public get isLogging() {
         return !this._noLogs;
+    }
+
+    public get pool() {
+        return this._pool;
     }
 }
