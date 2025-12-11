@@ -51,7 +51,7 @@ export function LiquidityChart(props: LiquidityChartProps) {
         return maxInvHeight;
     });
 
-    const curTickWidth = () => 20;
+    const curTickWidth = () => 0;
 
     const baseWidth = () => {
         const r = ranges();
@@ -124,7 +124,7 @@ export function LiquidityChart(props: LiquidityChartProps) {
                     <For each={inv}>
                         {(it) => (
                             <div
-                                class="absolute cursor-pointer bg-blue opacity-50 hover:opacity-100"
+                                class="absolute bg-blue"
                                 style={{
                                     left: (it.left - leftOffset) * hf + "px",
                                     bottom: resHeight + "px",
@@ -142,7 +142,7 @@ export function LiquidityChart(props: LiquidityChartProps) {
 
                 <Show when={res}>
                     <div
-                        class="absolute cursor-pointer bg-blue opacity-50 hover:opacity-100"
+                        class="absolute bg-blue"
                         style={{
                             left: (res!.left - leftOffset) * hf + "px",
                             bottom: 0,
@@ -190,7 +190,7 @@ export function LiquidityChart(props: LiquidityChartProps) {
 
                             return (
                                 <div
-                                    class="absolute cursor-pointer bg-green opacity-50 hover:opacity-100"
+                                    class="absolute bg-green"
                                     style={{
                                         right: right + "px",
                                         bottom: bottom + "px",
@@ -209,7 +209,7 @@ export function LiquidityChart(props: LiquidityChartProps) {
 
                 <Show when={res}>
                     <div
-                        class="absolute cursor-pointer bg-green opacity-50 hover:opacity-100"
+                        class="absolute bg-green "
                         style={{
                             right: (rightOffset - res!.right) * hf + "px",
                             bottom: 0,
@@ -250,9 +250,13 @@ export function LiquidityChart(props: LiquidityChartProps) {
             : undefined;
     };
 
+    const curTickLeft = () => {
+        return horizontalSqueezeFactor() * quoteWidth();
+    };
+
     return (
         <div
-            class="flex flex-row"
+            class="relative flex flex-row opacity-40"
             style={{
                 width: props.containerWidth + "px",
                 height: props.containerHeight + "px",
@@ -266,12 +270,6 @@ export function LiquidityChart(props: LiquidityChartProps) {
                     </p>
                 </Show>
             </div>
-            <CurTick
-                widthPx={curTickWidth()}
-                base={props.liquidity.currentTick.base}
-                quote={props.liquidity.currentTick.quote}
-                idx={props.liquidity.currentTick.idx}
-            />
             <div class="relative">
                 {base()}
                 <Show when={rightPrice() !== undefined}>
@@ -280,6 +278,13 @@ export function LiquidityChart(props: LiquidityChartProps) {
                     </p>
                 </Show>
             </div>
+
+            <div
+                class="h-dvh w-[2px] bg-white absolute"
+                style={{
+                    left: curTickLeft() - 1 + "px",
+                }}
+            ></div>
         </div>
     );
 }

@@ -9,6 +9,8 @@ import { delay, panic } from "../logic/utils.ts";
 import { LiquidityChart } from "./LiquidityChart.tsx";
 import { ECs } from "../logic/ecs.ts";
 import { Beacon } from "../logic/beacon.ts";
+import { Logo } from "./Logo.tsx";
+import { GithubIcon, TelegramIcon, XIcon } from "./Icons.tsx";
 
 export const CURRENT_TICK = 114445; // 93323 USDC per 1 BTC | 4 Dec 2025
 const INIT_TICKS = 1000; // +-10% around cur price
@@ -16,7 +18,7 @@ const INIT_TICKS = 1000; // +-10% around cur price
 const BTC_QTY = "100"; // from uniswap WBTC/USDT | 4 Dec 2025
 const USD_QTY = "9_000_000"; // from uniswap WBTC/USDT | 4 Dec 2025
 const AVG_DAILY_VOLUME = "24_300_000"; // from uniswap WBTC/USDT | 4 Dec 2025
-const AVG_DAILY_VOLATILITY = "0.1"; // ~30% monthly
+const AVG_DAILY_VOLATILITY = "0.1";
 const UNISWAP_APR = 0.3279; // WBTC/USDT | 4 Dec 2025
 
 export let POOL = new Pool(CURRENT_TICK, INIT_TICKS, false, {
@@ -35,7 +37,7 @@ export function Simulation() {
     const [il, setIl] = createSignal(POOL.il);
     const [feeFactor, setFeeFactor] = createSignal(POOL.feeFactor);
 
-    const [isRunning, setRunning] = createSignal(false);
+    const [isRunning, setRunning] = createSignal(true);
 
     const [today, setToday] = createSignal({
         day: 1,
@@ -271,106 +273,156 @@ export function Simulation() {
         return reserveNow.sub(reserveThen);
     };
 
+    let chartParent!: HTMLDivElement;
+    const [chartSize, setChartSize] = createSignal({
+        w: 0,
+        h: 0,
+    });
+
+    onMount(() => {
+        setChartSize({
+            w: chartParent.clientWidth,
+            h: chartParent.clientHeight,
+        });
+
+        window.addEventListener("resize", () => {
+            setChartSize({
+                w: chartParent.clientWidth,
+                h: chartParent.clientHeight,
+            });
+        });
+    });
+
     return (
-        <div class="flex flex-col gap-20 w-5xl text-white">
-            <div class="flex flex-col relative">
+        <div class="relative w-dvw h-dvh flex flex-col gap-10">
+            <div ref={chartParent} class="absolute w-dvw h-dvh overflow-hidden">
                 <LiquidityChart
                     liquidity={liquidity()}
-                    containerWidth={1000}
-                    containerHeight={500}
+                    containerWidth={chartSize().w}
+                    containerHeight={chartSize().h}
                 />
             </div>
 
-            <div class="flex flex-row gap-5">
-                <button
-                    type="submit"
-                    class="bg-white text-black"
-                    onclick={handleRunClick}
-                >
-                    {isRunning() ? "Stop" : "Start"}
-                </button>
-                <div class="flex flex-row gap-2">
-                    <div class="flex flex-col gap-2">
-                        <p>Volatility (24h)</p>
-                        <input
-                            type="range"
-                            min={0.001}
-                            max={0.5}
-                            step={0.001}
-                            value={avgDailyVolatility().toNumber()}
-                            onchange={(e) =>
-                                setAvgDailyVolatility(
-                                    ECs.fromString(e.currentTarget.value)
-                                )
-                            }
-                        />
-                    </div>
-                    <p>{avgDailyVolatility().mul(100).toString(2)}%</p>
+            <Logo class="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2" />
+
+            <div class="absolute bottom-4 left-4 right-4 flex flex-row items-center self-stretch justify-between px-4">
+                <p class="text-white underline">
+                    <a href="https://github.com/Drifty-Labs/drifty-dex">
+                        visualization of the actual algorithm
+                    </a>
+                </p>
+
+                <div class="flex flex-row gap-1">
+                    <a href="https://github.com/Drifty-Labs/drifty-dex">
+                        <GithubIcon />
+                    </a>
+                    <a href="https://t.me/driftyicp">
+                        <TelegramIcon />
+                    </a>
+                    <a href="twitter.com/msqwallet">
+                        <XIcon />
+                    </a>
                 </div>
             </div>
 
-            <div class="flex flex-col gap-y-10">
-                <div class="flex flex-row gap-x-10 gap-y-2 flex-wrap">
-                    <p>Day: {today().day}</p>
-                    <p>
-                        Daily Volume (avg. 30d): $
-                        {avgVolume30d().toShortString()}
-                    </p>
-                    <p>
-                        Daily Fees (avg. 30d): ${avgFees30d().toShortString()}
-                    </p>
-                    <p>
-                        APR (avg. 30d):{" "}
-                        {avgFees30d()
-                            .div(POOL.tvlQuote)
-                            .mul(100 * 365)
-                            .toShortString()}
-                        %
-                    </p>
-                    <p>
-                        Fee % (real-time): {feeFactor().mul(100).toString(2)}%
-                    </p>
-                    <p>
-                        Slippage % (avg. 24h):{" "}
-                        {avgSlippage24h().mul(100).toString(2)}%
-                    </p>
-                    <p>
-                        Trade Size (avg. 24h): $
-                        {avgTradeSize24h().toShortString()}
-                    </p>
+            <div class="hidden relative flex flex-col gap-20 w-5xl text-white">
+                <div class="flex flex-row gap-5">
+                    <button
+                        type="submit"
+                        class="bg-white text-black"
+                        onclick={handleRunClick}
+                    >
+                        {isRunning() ? "Stop" : "Start"}
+                    </button>
+                    <div class="flex flex-row gap-2">
+                        <div class="flex flex-col gap-2">
+                            <p>Volatility (24h)</p>
+                            <input
+                                type="range"
+                                min={0.001}
+                                max={0.5}
+                                step={0.001}
+                                value={avgDailyVolatility().toNumber()}
+                                onchange={(e) =>
+                                    setAvgDailyVolatility(
+                                        ECs.fromString(e.currentTarget.value)
+                                    )
+                                }
+                            />
+                        </div>
+                        <p>{avgDailyVolatility().mul(100).toString(2)}%</p>
+                    </div>
                 </div>
 
-                <div class="flex flex-row justify-between">
-                    <div class="flex flex-col gap-2">
-                        <h3>USD AMM</h3>
+                <div class="flex flex-col gap-y-10">
+                    <div class="flex flex-row gap-x-10 gap-y-2 flex-wrap">
+                        <p>Day: {today().day}</p>
                         <p>
-                            Reserve: $
-                            {stats().quote.actualReserve.toShortString()}
+                            Daily Volume (avg. 30d): $
+                            {avgVolume30d().toShortString()}
                         </p>
                         <p>
-                            Inventory: $
-                            {stats().quote.respectiveReserve.toShortString()}
+                            Daily Fees (avg. 30d): $
+                            {avgFees30d().toShortString()}
                         </p>
                         <p>
-                            Impermanent Loss: {il().quote.mul(100).toString(2)}%
+                            APR (avg. 30d):{" "}
+                            {avgFees30d()
+                                .div(POOL.tvlQuote)
+                                .mul(100 * 365)
+                                .toShortString()}
+                            %
                         </p>
-                        <p>Total Profit: ${quoteProfit().toShortString()}</p>
+                        <p>
+                            Fee % (real-time):{" "}
+                            {feeFactor().mul(100).toString(2)}%
+                        </p>
+                        <p>
+                            Slippage % (avg. 24h):{" "}
+                            {avgSlippage24h().mul(100).toString(2)}%
+                        </p>
+                        <p>
+                            Trade Size (avg. 24h): $
+                            {avgTradeSize24h().toShortString()}
+                        </p>
                     </div>
 
-                    <div class="flex flex-col gap-2">
-                        <h3>BTC AMM</h3>
-                        <p>
-                            Reserve: ₿
-                            {stats().base.actualReserve.toShortString()}
-                        </p>
-                        <p>
-                            Inventory: ₿
-                            {stats().base.respectiveReserve.toShortString()}
-                        </p>
-                        <p>
-                            Impermanent Loss: {il().base.mul(100).toString(2)}%
-                        </p>
-                        <p>Total Profit: ₿{baseProfit().toShortString()}</p>
+                    <div class="flex flex-row justify-between">
+                        <div class="flex flex-col gap-2">
+                            <h3>USD AMM</h3>
+                            <p>
+                                Reserve: $
+                                {stats().quote.actualReserve.toShortString()}
+                            </p>
+                            <p>
+                                Inventory: $
+                                {stats().quote.respectiveReserve.toShortString()}
+                            </p>
+                            <p>
+                                Impermanent Loss:{" "}
+                                {il().quote.mul(100).toString(2)}%
+                            </p>
+                            <p>
+                                Total Profit: ${quoteProfit().toShortString()}
+                            </p>
+                        </div>
+
+                        <div class="flex flex-col gap-2">
+                            <h3>BTC AMM</h3>
+                            <p>
+                                Reserve: ₿
+                                {stats().base.actualReserve.toShortString()}
+                            </p>
+                            <p>
+                                Inventory: ₿
+                                {stats().base.respectiveReserve.toShortString()}
+                            </p>
+                            <p>
+                                Impermanent Loss:{" "}
+                                {il().base.mul(100).toString(2)}%
+                            </p>
+                            <p>Total Profit: ₿{baseProfit().toShortString()}</p>
+                        </div>
                     </div>
                 </div>
             </div>
