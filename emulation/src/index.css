@@ -1,0 +1,38 @@
+@import "tailwindcss";
+
+@theme {
+    --color-red: #ff0000;
+    --color-green: #00ff00;
+    --color-blue: #0000ff;
+    --color-bg: #111111;
+    --font-logo: JetBrainsMono, sans-serif;
+}
+
+@font-face {
+    font-family: JetBrainsMono;
+    font-style: bold;
+    font-weight: 700;
+    src: url("/fonts/JetBrainsMono-BoldItalic.woff2") format("woff2");
+}
+
+@layer utilities {
+    .scrollbar::-webkit-scrollbar {
+        width: 5px;
+        height: 5px;
+    }
+
+    .scrollbar::-webkit-scrollbar-track {
+        border-radius: 100vh;
+        background: rgba(255, 255, 255, 0.1);
+    }
+
+    .scrollbar::-webkit-scrollbar-thumb {
+        background: rgba(255, 255, 255, 0.5);
+        border-radius: 100vh;
+        border: 3px solid rgba(255, 255, 255, 0.5);
+    }
+
+    .scrollbar::-webkit-scrollbar-thumb:hover {
+        background: rgba(255, 255, 255, 0.5);
+    }
+}
