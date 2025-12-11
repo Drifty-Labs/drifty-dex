@@ -34,6 +34,8 @@ export class Range {
             if (this.$.isReserve) this._right += 1;
             else this._left -= 1;
         }
+
+        this._respectiveInventoryQty = undefined;
     }
 
     public putBestUniform(reserveQty: ECs) {
@@ -49,6 +51,8 @@ export class Range {
             if (this.$.isReserve) this._right += 1;
             else this._left -= 1;
         }
+
+        this._respectiveInventoryQty = undefined;
     }
 
     public putWorst(reserveQty: ECs) {
@@ -73,6 +77,8 @@ export class Range {
             if (this.$.isReserve) this._left -= 1;
             else this._right += 1;
         }
+
+        this._respectiveInventoryQty = undefined;
     }
 
     public takeBest(): TakeResult {
@@ -101,6 +107,7 @@ export class Range {
             }
         }
 
+        this._respectiveInventoryQty = undefined;
         const respectiveInventoryQty = reserveQty.mul(this.$.price(tickIdx));
 
         return { reserveQty, respectiveInventoryQty, tickIdx };
@@ -132,6 +139,7 @@ export class Range {
             }
         }
 
+        this._respectiveInventoryQty = undefined;
         const respectiveInventoryQty = reserveQty.mul(this.$.price(tickIdx));
 
         return {
@@ -168,6 +176,7 @@ export class Range {
         this.assertBoundsOk();
 
         this._reserveQty.addAssign(reserveQty);
+        this._respectiveInventoryQty = undefined;
     }
 
     public splitUniform(cut: ECs): Range {
@@ -176,6 +185,7 @@ export class Range {
 
         const qty = this._reserveQty.mul(cut);
         this._reserveQty.subAssign(qty);
+        this._respectiveInventoryQty = undefined;
 
         return new Range(
             qty,
@@ -200,8 +210,12 @@ export class Range {
             this._left = newWorst;
         }
 
+        this._respectiveInventoryQty = undefined;
+
         this.assertBoundsOk();
     }
+
+    private _respectiveInventoryQty: ECs | undefined = undefined;
 
     constructor(
         private _reserveQty: ECs,
@@ -281,7 +295,15 @@ export class Range {
         return this.getPerTickReserveQty().mul(this.$.price(tickIdx));
     }
 
-    public calcInventoryQty() {
+    public getRespectiveInventoryQty() {
+        if (this._respectiveInventoryQty === undefined) {
+            this._respectiveInventoryQty = this.calcInventoryQty();
+        }
+
+        return this._respectiveInventoryQty.clone();
+    }
+
+    private calcInventoryQty() {
         this.assertBoundsOk();
 
         const worstTickQty = this.calcInventoryQtyAtTick(this.getWorst());

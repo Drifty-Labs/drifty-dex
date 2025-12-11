@@ -1,7 +1,7 @@
 /** The minimum possible tick index. */
-export const MIN_TICK = -887272;
+export const MIN_TICK = -552626;
 /** The maximum possible tick index. */
-export const MAX_TICK = 887272;
+export const MAX_TICK = 552626;
 
 /**
  * A generic type for representing two-sided objects, such as AMMs for the base and quote assets.
@@ -59,4 +59,24 @@ export function delay(ms: number) {
 
 export function xor(a: boolean, b: boolean): boolean {
     return (!a && b) || (a && !b);
+}
+
+export function chunkify<T>(arr: readonly T[], chunks: number): T[][] {
+    if (!Number.isInteger(chunks) || chunks <= 0) {
+        throw new RangeError("`chunks` must be a positive integer.");
+    }
+
+    const n = arr.length;
+    const base = Math.floor(n / chunks);
+    const rem = n % chunks;
+
+    const out: T[][] = new Array(chunks);
+    let i = 0;
+
+    for (let c = 0; c < chunks; c++) {
+        const size = base + (c < rem ? 1 : 0);
+        out[c] = arr.slice(i, i + size);
+        i += size;
+    }
+    return out;
 }

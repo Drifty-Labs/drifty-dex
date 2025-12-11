@@ -152,7 +152,7 @@ export class AMM {
 
     public getActualInventory(): ECs {
         const liquidityInventory = this._liquidity.inventory.reduce(
-            (prev, cur) => prev.add(cur.calcInventoryQty()),
+            (prev, cur) => prev.add(cur.getRespectiveInventoryQty()),
             ECs.zero()
         );
 

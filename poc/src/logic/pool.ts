@@ -342,7 +342,8 @@ export class Pool {
                 )
                     .add(
                         this.driftingAMM.base.liquidity.inventory.reduce(
-                            (prev, cur) => prev.add(cur.calcInventoryQty()),
+                            (prev, cur) =>
+                                prev.add(cur.getRespectiveInventoryQty()),
                             ECs.zero()
                         )
                     )
@@ -359,7 +360,8 @@ export class Pool {
                 )
                     .add(
                         this.stableAMM.base.liquidity.inventory.reduce(
-                            (prev, cur) => prev.add(cur.calcInventoryQty()),
+                            (prev, cur) =>
+                                prev.add(cur.getRespectiveInventoryQty()),
                             ECs.zero()
                         )
                     )
@@ -381,7 +383,8 @@ export class Pool {
                 )
                     .add(
                         this.driftingAMM.quote.liquidity.inventory.reduce(
-                            (prev, cur) => prev.add(cur.calcInventoryQty()),
+                            (prev, cur) =>
+                                prev.add(cur.getRespectiveInventoryQty()),
                             ECs.zero()
                         )
                     )
@@ -396,7 +399,8 @@ export class Pool {
                 )
                     .add(
                         this.stableAMM.quote.liquidity.inventory.reduce(
-                            (prev, cur) => prev.add(cur.calcInventoryQty()),
+                            (prev, cur) =>
+                                prev.add(cur.getRespectiveInventoryQty()),
                             ECs.zero()
                         )
                     )

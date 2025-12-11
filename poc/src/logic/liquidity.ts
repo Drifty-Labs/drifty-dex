@@ -53,7 +53,9 @@ export class Liquidity {
     ) {
         while (true) {
             const tickBefore = this.takeWorstInventoryTick();
-            if (!tickBefore) break;
+            if (!tickBefore) {
+                break;
+            }
 
             const res = fn({
                 reserveQty: tickBefore.reserveQty.clone(),
@@ -64,6 +66,7 @@ export class Liquidity {
 
             if (!res) {
                 this.putWorstInventoryTick(tickBefore);
+
                 break;
             }
 
@@ -86,6 +89,7 @@ export class Liquidity {
                 };
 
                 this.putWorstInventoryTick(tickAfter);
+
                 break;
             }
         }
@@ -142,7 +146,9 @@ export class Liquidity {
         }
 
         for (const inv of this._inventory) {
-            inventory.addAssign(inv.splitUniform(cut).calcInventoryQty());
+            inventory.addAssign(
+                inv.splitUniform(cut).getRespectiveInventoryQty()
+            );
         }
 
         return { reserve, inventory };
@@ -320,5 +326,12 @@ export class Liquidity {
 
         if (this.$.isBase) return this._inventory[0].getWorst();
         else return this._inventory[this._inventory.length - 1].getWorst();
+    }
+
+    public peekWorstInventory() {
+        if (this._inventory.length === 0) return undefined;
+
+        if (this.$.isBase) return this._inventory[0].peekWorst();
+        else return this._inventory[this._inventory.length - 1].peekWorst();
     }
 }

@@ -1,9 +1,9 @@
 import { createMemo, For, Show } from "solid-js";
 import { type LiquidityDigestAbsolute } from "../logic/pool.ts";
-import { type TwoSided } from "../logic/utils.ts";
-import { CurTick } from "./CurTick.tsx";
+import { chunkify, type Side, type TwoSided } from "../logic/utils.ts";
 import { Beacon } from "../logic/beacon.ts";
 import { POOL } from "./Simulation.tsx";
+import { absoluteTickToPrice } from "../logic/ecs.ts";
 
 export type LiquidityChartProps = {
     liquidity: LiquidityDigestAbsolute;
@@ -98,7 +98,7 @@ export function LiquidityChart(props: LiquidityChartProps) {
     const base = () => {
         const r = ranges();
         const res = r.base.reserve;
-        const inv = r.base.oppositeInventory;
+        const inv = combineRanges("base", r.base.oppositeInventory);
 
         if (!res && inv.length === 0) return <div class="relative empty"></div>;
 
@@ -159,7 +159,7 @@ export function LiquidityChart(props: LiquidityChartProps) {
     const quote = () => {
         const r = ranges();
         const res = r.quote.reserve;
-        const inv = r.quote.oppositeInventory;
+        const inv = combineRanges("quote", r.quote.oppositeInventory);
 
         if (!res && inv.length === 0) return <div class="relative empty"></div>;
 
@@ -280,13 +280,47 @@ export function LiquidityChart(props: LiquidityChartProps) {
             </div>
 
             <div
-                class="h-dvh w-[2px] bg-white absolute"
+                class="h-dvh w-[2px] bg-white absolute flex flex-col items-center justify-end py-20"
                 style={{
                     left: curTickLeft() - 1 + "px",
                 }}
-            ></div>
+            >
+                <p class="text-red font-semibold text-xl">
+                    {absoluteTickToPrice(
+                        props.liquidity.currentTick.idx,
+                        "base",
+                        "reserve"
+                    ).toString(2)}
+                </p>
+            </div>
         </div>
     );
+}
+
+function combineRanges(side: Side, ranges: RangeInner[]): RangeInner[] {
+    if (ranges.length <= 11) return ranges;
+
+    const firstRange = side === "base" ? ranges[ranges.length - 1] : ranges[0];
+    const otherRanges =
+        side === "base"
+            ? ranges.slice(0, ranges.length - 1)
+            : ranges.slice(1, ranges.length);
+
+    const chunks = chunkify(otherRanges, 10);
+    const combinedRanges: RangeInner[] = [];
+
+    for (const chunk of chunks) {
+        const left = chunk[0].left;
+        const right = chunk[chunk.length - 1].right;
+        const height =
+            chunk.reduce((prev, cur) => prev + cur.height, 0) / chunk.length;
+
+        combinedRanges.push({ left, right, height });
+    }
+
+    return side === "base"
+        ? [firstRange, ...combinedRanges]
+        : [...combinedRanges, firstRange];
 }
 
 function flattenRanges(

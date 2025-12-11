@@ -41,36 +41,40 @@ export class RecoveryBin {
         const inventoryOut = ECs.zero();
         const reminderReserveIn = args.reserveIn.clone();
 
-        if (this._collateral.isZero())
+        if (this._collateral.isZero()) {
             return {
                 inventoryOut,
                 reminderReserveIn,
             };
+        }
 
         this.liquidity.borrowInventoryForRecovery((wt) => {
-            if (wt.tickIdx === args.curTickIdx) return undefined;
+            if (wt.tickIdx === args.curTickIdx) {
+                return undefined;
+            }
 
-            if (reminderReserveIn.ge(wt.reserveQty)) {
-                const translatedInventory = wt.reserveQty.mul(
+            if (reminderReserveIn.lt(wt.reserveQty)) {
+                const haveInventory = reminderReserveIn.mul(
+                    this.$.price(wt.tickIdx)
+                );
+                const wantInventory = reminderReserveIn.mul(
                     this.$.price(args.curTickIdx)
                 );
 
-                if (translatedInventory.lt(wt.respectiveInventoryQty)) {
+                if (wantInventory.lt(haveInventory)) {
                     panic(
                         `[RecoveryBin ${this.$}] Should always require more inventory to recover the tick`
                     );
                 }
 
-                const missingInventoryToBreakEven = translatedInventory.sub(
-                    wt.respectiveInventoryQty
-                );
+                const missingInventoryToBreakEven =
+                    wantInventory.sub(haveInventory);
 
-                // if we have enough
                 if (this._collateral.ge(missingInventoryToBreakEven)) {
                     this._collateral.subAssign(missingInventoryToBreakEven);
 
-                    inventoryOut.addAssign(translatedInventory.clone());
-                    reminderReserveIn.subAssign(wt.reserveQty);
+                    inventoryOut.addAssign(wantInventory);
+                    reminderReserveIn.subAssign(reminderReserveIn);
 
                     return {
                         curTickIdx: args.curTickIdx,
@@ -81,13 +85,10 @@ export class RecoveryBin {
                 const recoveredShare = this._collateral.div(
                     missingInventoryToBreakEven
                 );
-                const recoveredReserve = wt.reserveQty.mul(recoveredShare);
-                const recoveredInventory =
-                    wt.respectiveInventoryQty.mul(recoveredShare);
+                const recoveredReserve = reminderReserveIn.mul(recoveredShare);
+                const recoveredInventory = wantInventory.mul(recoveredShare);
 
-                inventoryOut.addAssign(
-                    this._collateral.add(recoveredInventory)
-                );
+                inventoryOut.addAssign(recoveredInventory);
                 reminderReserveIn.subAssign(recoveredReserve);
                 this._collateral = ECs.zero();
 
@@ -96,6 +97,49 @@ export class RecoveryBin {
                     leftoverReserveQty: wt.reserveQty.sub(recoveredReserve),
                 };
             }
+
+            const wantInventory = wt.reserveQty.mul(
+                this.$.price(args.curTickIdx)
+            );
+
+            if (wantInventory.lt(wt.respectiveInventoryQty)) {
+                panic(
+                    `[RecoveryBin ${this.$}] Should always require more inventory to recover the tick`
+                );
+            }
+
+            const missingInventoryToBreakEven = wantInventory.sub(
+                wt.respectiveInventoryQty
+            );
+
+            // if we have enough
+            if (this._collateral.ge(missingInventoryToBreakEven)) {
+                this._collateral.subAssign(missingInventoryToBreakEven);
+
+                inventoryOut.addAssign(wantInventory.clone());
+                reminderReserveIn.subAssign(wt.reserveQty);
+
+                return {
+                    curTickIdx: args.curTickIdx,
+                    leftoverReserveQty: ECs.zero(),
+                };
+            }
+
+            const recoveredShare = this._collateral.div(
+                missingInventoryToBreakEven
+            );
+            const recoveredReserve = wt.reserveQty.mul(recoveredShare);
+            const recoveredInventory =
+                wt.respectiveInventoryQty.mul(recoveredShare);
+
+            inventoryOut.addAssign(this._collateral.add(recoveredInventory));
+            reminderReserveIn.subAssign(recoveredReserve);
+            this._collateral = ECs.zero();
+
+            return {
+                curTickIdx: args.curTickIdx,
+                leftoverReserveQty: wt.reserveQty.sub(recoveredReserve),
+            };
         });
 
         if (this._collateral.isZero()) {

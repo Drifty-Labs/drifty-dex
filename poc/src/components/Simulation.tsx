@@ -149,8 +149,8 @@ export function Simulation() {
                 .mul(10)
                 .div(4);
             pivotTick = generateNextDayPivotTick({
-                todayVolatility: avgDailyVolatility(),
                 todayPivotTick: pivotTick,
+                todayVolatility: avgDailyVolatility(),
             });
 
             setAvgSlippage24h([]);
@@ -241,7 +241,7 @@ export function Simulation() {
                 }
             }
 
-            await delay(10);
+            await delay(5);
         }
     });
 
@@ -325,7 +325,7 @@ export function Simulation() {
                 </div>
             </div>
 
-            <div class="hidden relative flex flex-col gap-20 w-5xl text-white">
+            <div class="relative flex flex-col gap-20 w-5xl text-white">
                 <div class="flex flex-row gap-5">
                     <button
                         type="submit"
@@ -375,11 +375,11 @@ export function Simulation() {
                         </p>
                         <p>
                             Fee % (real-time):{" "}
-                            {feeFactor().mul(100).toString(2)}%
+                            {feeFactor().mul(100).toString(4)}%
                         </p>
                         <p>
                             Slippage % (avg. 24h):{" "}
-                            {avgSlippage24h().mul(100).toString(2)}%
+                            {avgSlippage24h().mul(100).toString(4)}%
                         </p>
                         <p>
                             Trade Size (avg. 24h): $
@@ -400,7 +400,7 @@ export function Simulation() {
                             </p>
                             <p>
                                 Impermanent Loss:{" "}
-                                {il().quote.mul(100).toString(2)}%
+                                {il().quote.mul(100).toString(4)}%
                             </p>
                             <p>
                                 Total Profit: ${quoteProfit().toShortString()}
@@ -419,7 +419,7 @@ export function Simulation() {
                             </p>
                             <p>
                                 Impermanent Loss:{" "}
-                                {il().base.mul(100).toString(2)}%
+                                {il().base.mul(100).toString(4)}%
                             </p>
                             <p>Total Profit: ₿{baseProfit().toShortString()}</p>
                         </div>
