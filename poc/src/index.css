@@ -5,14 +5,19 @@
     --color-green: #00ff00;
     --color-blue: #0000ff;
     --color-bg: #111111;
-    --font-logo: JetBrainsMono, sans-serif;
+    --color-bg1: #171717;
+    --font-main-italic: JetBrainsMonoItalic, sans-serif;
+    --font-main: JetBrainsMono, sans-serif;
 }
 
 @font-face {
     font-family: JetBrainsMono;
-    font-style: bold;
-    font-weight: 700;
-    src: url("/fonts/JetBrainsMono-BoldItalic.woff2") format("woff2");
+    src: url("/fonts/JetBrainsMono[wght].ttf") format("truetype");
+}
+
+@font-face {
+    font-family: JetBrainsMonoItalic;
+    src: url("/fonts/JetBrainsMono-Italic[wght].ttf") format("truetype");
 }
 
 @layer utilities {

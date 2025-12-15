@@ -74,11 +74,13 @@ export class RecoveryBin {
                     this._collateral.subAssign(missingInventoryToBreakEven);
 
                     inventoryOut.addAssign(wantInventory);
+                    const leftoverReserveQty =
+                        wt.reserveQty.sub(reminderReserveIn);
                     reminderReserveIn.subAssign(reminderReserveIn);
 
                     return {
                         curTickIdx: args.curTickIdx,
-                        leftoverReserveQty: ECs.zero(),
+                        leftoverReserveQty: leftoverReserveQty,
                     };
                 }
 
@@ -131,8 +133,10 @@ export class RecoveryBin {
             const recoveredReserve = wt.reserveQty.mul(recoveredShare);
             const recoveredInventory =
                 wt.respectiveInventoryQty.mul(recoveredShare);
+            const recoveredWantInventory =
+                this._collateral.add(recoveredInventory);
 
-            inventoryOut.addAssign(this._collateral.add(recoveredInventory));
+            inventoryOut.addAssign(recoveredWantInventory);
             reminderReserveIn.subAssign(recoveredReserve);
             this._collateral = ECs.zero();
 
@@ -141,6 +145,8 @@ export class RecoveryBin {
                 leftoverReserveQty: wt.reserveQty.sub(recoveredReserve),
             };
         });
+
+        // Uncomment to sell unused fees, instead of holding them for later
 
         if (this._collateral.isZero()) {
             return {

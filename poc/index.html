@@ -2,12 +2,286 @@
 <html lang="en">
     <head>
         <meta charset="UTF-8" />
-        <link rel="icon" type="image/svg+xml" href="/vite.svg" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <title>emulation</title>
+        <title>drifty | a dex that solves the impermanent loss problem</title>
+
+        <link
+            rel="icon"
+            type="image/png"
+            href="/img/favicon-96x96.png"
+            sizes="96x96"
+        />
+        <link rel="icon" type="image/svg+xml" href="/img/favicon.svg" />
+        <link rel="shortcut icon" href="/img/favicon.ico" />
+        <link
+            rel="apple-touch-icon"
+            sizes="180x180"
+            href="/img/apple-touch-icon.png"
+        />
+        <meta name="apple-mobile-web-app-title" content="drifty" />
+        <link rel="manifest" href="/img/site.webmanifest" />
+
+        <meta property="og:type" content="website" />
+        <meta property="og:title" content="drifty" />
+        <meta property="og:url" content="https://drifty.finance" />
+        <meta
+            property="og:image"
+            content="https://drifty.finance/img/open-graph.jpg"
+        />
+        <meta
+            property="og:description"
+            content="a dex that solves the impermanent loss problem"
+        />
+
+        <meta name="twitter:card" content="summary" />
+        <meta name="twitter:site" content="@msqwallet" />
+        <meta name="twitter:url" content="https://drifty.finance" />
+        <meta name="twitter:title" content="drifty" />
+        <meta
+            name="twitter:description"
+            content="a dex that solves the impermanent loss problem"
+        />
+        <meta name="twitter:image" content="/img/open-graph.jpg" />
+
+        <style>
+            @font-face {
+                font-family: JetBrainsMono;
+                src: url("/fonts/JetBrainsMono[wght].ttf") format("truetype");
+            }
+
+            @font-face {
+                font-family: JetBrainsMonoItalic;
+                src: url("/fonts/JetBrainsMono-Italic[wght].ttf")
+                    format("truetype");
+            }
+        </style>
+        <script>
+            function randomInterval(callback, min, max) {
+                const randomNum = (max, min = 0) =>
+                    Math.random() * (max - min) + min;
+
+                let targetTime = randomNum(min, max);
+                let lastInvoke = performance.now();
+
+                const stop = () => (targetTime = null);
+
+                const tick = () => {
+                    if (!targetTime) return;
+
+                    if (performance.now() - lastInvoke > targetTime) {
+                        lastInvoke = performance.now();
+                        targetTime = randomNum(min, max);
+                        callback &&
+                            typeof callback === "function" &&
+                            callback(stop);
+                    }
+
+                    requestAnimationFrame(tick);
+                };
+
+                tick();
+            }
+
+            randomInterval(
+                () => {
+                    const logo = document.getElementById("logo");
+                    if (!logo) return;
+
+                    const logoShouldMove = Math.random() > 0.9;
+                    if (logoShouldMove) {
+                        logo.style.left =
+                            Math.floor(Math.random() * 200 - 100) + "px";
+                        logo.style.top =
+                            Math.floor(Math.random() * 200 - 100) + "px";
+                    } else {
+                        logo.style.left = 0;
+                        logo.style.top = 0;
+                    }
+
+                    const s20 = 16;
+                    const s10 = 8;
+
+                    const red = document.getElementById("logo-red");
+                    if (red) {
+                        const redShouldMove = Math.random() > 0.8;
+                        if (redShouldMove) {
+                            red.style.left =
+                                Math.floor(Math.random() * s20 - s10) + "px";
+                            red.style.top =
+                                Math.floor(Math.random() * s20 - s10) + "px";
+                        } else {
+                            red.style.left = 0;
+                            red.style.top = 0;
+                        }
+                    }
+
+                    const green = document.getElementById("logo-green");
+                    if (green) {
+                        const greenShouldMove = Math.random() > 0.8;
+                        if (greenShouldMove) {
+                            green.style.left =
+                                Math.floor(Math.random() * s20 - s10) + "px";
+                            green.style.top =
+                                Math.floor(Math.random() * s20 - s10) + "px";
+                        } else {
+                            green.style.left = 0;
+                            green.style.top = 0;
+                        }
+                    }
+
+                    const blue = document.getElementById("logo-blue");
+                    if (blue) {
+                        const blueShouldMove = Math.random() > 0.8;
+                        if (blueShouldMove) {
+                            blue.style.left =
+                                Math.floor(Math.random() * s20 - s10) + "px";
+                            blue.style.top =
+                                Math.floor(Math.random() * s20 - s10) + "px";
+                        } else {
+                            blue.style.left = 0;
+                            blue.style.top = 0;
+                        }
+                    }
+                },
+                50,
+                400
+            );
+
+            setInterval(() => {
+                const loadingText = document.getElementById("loading-text");
+                if (!loadingText) return;
+
+                switch (loadingText.innerText) {
+                    case "...": {
+                        loadingText.innerText = "";
+                        break;
+                    }
+                    case "": {
+                        loadingText.innerText = ".";
+                        break;
+                    }
+                    case ".": {
+                        loadingText.innerText = "..";
+                        break;
+                    }
+                    default: {
+                        loadingText.innerHTML = "...";
+                    }
+                }
+            }, 500);
+        </script>
     </head>
-    <body>
-        <div id="root" class="min-w-dvw min-h-dvh relative flex flex-col"></div>
+    <body style="background-color: #111111">
+        <div
+            id="loader"
+            style="
+                position: absolute;
+                z-index: 1;
+                background-color: #111111;
+                width: 100dvw;
+                height: 100dvh;
+                display: flex;
+                flex-flow: column nowrap;
+                align-items: center;
+                justify-content: center;
+            "
+        >
+            <div
+                id="loader-content"
+                style="
+                    display: flex;
+                    flex-flow: column nowrap;
+                    gap: 30px;
+                    align-items: center;
+                    justify-content: center;
+                "
+            >
+                <div
+                    id="logo"
+                    style="
+                        position: relative;
+                        font-family: JetBrainsMonoItalic, sans-serif;
+                        font-weight: bold;
+                        font-size: 200px;
+                        left: 0;
+                        right: 0;
+                        transition: left cubic-bezier(0.445, 0.05, 0.55, 0.95)
+                                5ms,
+                            top cubic-bezier(0.445, 0.05, 0.55, 0.95) 5ms;
+                    "
+                >
+                    <h1 style="color: white; position: relative; z-index: 1">
+                        drifty
+                    </h1>
+                    <h1
+                        id="logo-blue"
+                        style="
+                            color: #0000ff;
+                            position: absolute;
+                            left: 0;
+                            top: 0;
+                            transition: left
+                                    cubic-bezier(0.445, 0.05, 0.55, 0.95) 50ms,
+                                top cubic-bezier(0.445, 0.05, 0.55, 0.95) 50ms;
+                        "
+                    >
+                        drifty
+                    </h1>
+                    <h1
+                        id="logo-red"
+                        style="
+                            color: #ff0000;
+                            position: absolute;
+                            left: 0;
+                            top: 0;
+                            transition: left
+                                    cubic-bezier(0.445, 0.05, 0.55, 0.95) 50ms,
+                                top cubic-bezier(0.445, 0.05, 0.55, 0.95) 50ms;
+                        "
+                    >
+                        drifty
+                    </h1>
+
+                    <h1
+                        id="logo-green"
+                        style="
+                            color: #00ff00;
+                            position: absolute;
+                            left: 0;
+                            top: 0;
+                            transition: left
+                                    cubic-bezier(0.445, 0.05, 0.55, 0.95) 50ms,
+                                top cubic-bezier(0.445, 0.05, 0.55, 0.95) 50ms;
+                        "
+                    >
+                        drifty
+                    </h1>
+                </div>
+                <div
+                    id="loading"
+                    style="
+                        position: relative;
+                        font-family: JetBrainsMono;
+                        font-weight: 300;
+                        font-size: 24px;
+                        color: white;
+                        display: flex;
+                    "
+                >
+                    <p>loading</p>
+                    <span style="display: inline; position: relative">
+                        <p style="position: relative; color: transparent">
+                            ...
+                        </p>
+                        <p
+                            id="loading-text"
+                            style="position: absolute; top: 0; left: 0"
+                        ></p>
+                    </span>
+                </div>
+            </div>
+        </div>
+        <div id="root"></div>
         <script type="module" src="/src/index.tsx"></script>
     </body>
 </html>

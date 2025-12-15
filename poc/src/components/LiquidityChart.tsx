@@ -3,7 +3,6 @@ import { type LiquidityDigestAbsolute } from "../logic/pool.ts";
 import { chunkify, type Side, type TwoSided } from "../logic/utils.ts";
 import { Beacon } from "../logic/beacon.ts";
 import { POOL } from "./Simulation.tsx";
-import { absoluteTickToPrice } from "../logic/ecs.ts";
 
 export type LiquidityChartProps = {
     liquidity: LiquidityDigestAbsolute;
@@ -124,7 +123,7 @@ export function LiquidityChart(props: LiquidityChartProps) {
                     <For each={inv}>
                         {(it) => (
                             <div
-                                class="absolute bg-blue"
+                                class="absolute bg-blue transition-all"
                                 style={{
                                     left: (it.left - leftOffset) * hf + "px",
                                     bottom: resHeight + "px",
@@ -142,7 +141,7 @@ export function LiquidityChart(props: LiquidityChartProps) {
 
                 <Show when={res}>
                     <div
-                        class="absolute bg-blue"
+                        class="absolute bg-blue transition-all"
                         style={{
                             left: (res!.left - leftOffset) * hf + "px",
                             bottom: 0,
@@ -190,7 +189,7 @@ export function LiquidityChart(props: LiquidityChartProps) {
 
                             return (
                                 <div
-                                    class="absolute bg-green"
+                                    class="absolute bg-green transition-all"
                                     style={{
                                         right: right + "px",
                                         bottom: bottom + "px",
@@ -209,7 +208,7 @@ export function LiquidityChart(props: LiquidityChartProps) {
 
                 <Show when={res}>
                     <div
-                        class="absolute bg-green "
+                        class="absolute bg-green transition-all"
                         style={{
                             right: (rightOffset - res!.right) * hf + "px",
                             bottom: 0,
@@ -256,7 +255,7 @@ export function LiquidityChart(props: LiquidityChartProps) {
 
     return (
         <div
-            class="relative flex flex-row opacity-40"
+            class="relative flex flex-row"
             style={{
                 width: props.containerWidth + "px",
                 height: props.containerHeight + "px",
@@ -284,15 +283,7 @@ export function LiquidityChart(props: LiquidityChartProps) {
                 style={{
                     left: curTickLeft() - 1 + "px",
                 }}
-            >
-                <p class="text-red font-semibold text-xl">
-                    {absoluteTickToPrice(
-                        props.liquidity.currentTick.idx,
-                        "base",
-                        "reserve"
-                    ).toString(2)}
-                </p>
-            </div>
+            ></div>
         </div>
     );
 }

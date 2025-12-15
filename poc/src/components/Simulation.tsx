@@ -1,4 +1,4 @@
-import { createSignal, onMount } from "solid-js";
+import { createEffect, createSignal, onCleanup, onMount } from "solid-js";
 import { Pool, type SwapArgs } from "../logic/pool.ts";
 import {
     generateNextDayPivotTick,
@@ -7,10 +7,8 @@ import {
 } from "../logic/trade-gen.ts";
 import { delay, panic } from "../logic/utils.ts";
 import { LiquidityChart } from "./LiquidityChart.tsx";
-import { ECs } from "../logic/ecs.ts";
+import { absoluteTickToPrice, ECs } from "../logic/ecs.ts";
 import { Beacon } from "../logic/beacon.ts";
-import { Logo } from "./Logo.tsx";
-import { GithubIcon, TelegramIcon, XIcon } from "./Icons.tsx";
 
 export const CURRENT_TICK = 114445; // 93323 USDC per 1 BTC | 4 Dec 2025
 const INIT_TICKS = 1000; // +-10% around cur price
@@ -18,8 +16,6 @@ const INIT_TICKS = 1000; // +-10% around cur price
 const BTC_QTY = "100"; // from uniswap WBTC/USDT | 4 Dec 2025
 const USD_QTY = "9_000_000"; // from uniswap WBTC/USDT | 4 Dec 2025
 const AVG_DAILY_VOLUME = "24_300_000"; // from uniswap WBTC/USDT | 4 Dec 2025
-const AVG_DAILY_VOLATILITY = "0.1";
-const UNISWAP_APR = 0.3279; // WBTC/USDT | 4 Dec 2025
 
 export let POOL = new Pool(CURRENT_TICK, INIT_TICKS, false, {
     baseQty: ECs.fromString(BTC_QTY),
@@ -28,16 +24,51 @@ export let POOL = new Pool(CURRENT_TICK, INIT_TICKS, false, {
 
 const ORIGINAL_STATS = POOL.stats;
 
-export function Simulation() {
-    const [avgDailyVolatility, setAvgDailyVolatility] = createSignal(
-        ECs.fromString(AVG_DAILY_VOLATILITY)
-    );
+export type Metrics = {
+    day: number;
+    curPrice: ECs;
+    curFeeFactor: ECs;
+
+    avgVolume: ECs;
+    avgFees: ECs;
+    avgTxnSize: ECs;
+    avgAPR: ECs;
+    avgSlippage: ECs;
+
+    usdReserve: ECs;
+    usdInventory: ECs;
+    usdProfit: ECs;
+    usdProfitPercent: ECs;
+    usdIL: ECs;
+
+    btcReserve: ECs;
+    btcInventory: ECs;
+    btcProfit: ECs;
+    btcProfitPercent: ECs;
+    btcIL: ECs;
+};
+
+export type SimulationProps = {
+    updMetrics: (m: Metrics) => void;
+    speed: number;
+    volatility: number;
+    isRunning: boolean;
+    isSim: boolean;
+};
+
+export function Simulation(props: SimulationProps) {
+    const isRunning = () => props.isRunning;
+    const avgDailyVolatility = () =>
+        ECs.fromString((props.volatility / 100).toFixed(2));
+    const speed = () => props.speed;
+
     const [liquidity, setLiquidity] = createSignal(POOL.liquidityDigest);
     const [stats, setStats] = createSignal(ORIGINAL_STATS);
     const [il, setIl] = createSignal(POOL.il);
     const [feeFactor, setFeeFactor] = createSignal(POOL.feeFactor);
-
-    const [isRunning, setRunning] = createSignal(true);
+    const [opacity, setOpacity] = createSignal(
+        window.scrollY === 0 ? 0.6 : 0.2
+    );
 
     const [today, setToday] = createSignal({
         day: 1,
@@ -48,71 +79,6 @@ export function Simulation() {
         ),
         fees: ECs.zero(),
     });
-
-    const [_avgSlippage24h, setAvgSlippage24h] = createSignal<ECs[]>([]);
-
-    const addSlippage = (slippage: ECs) => {
-        setAvgSlippage24h((s) => {
-            s.push(slippage);
-            return [...s];
-        });
-    };
-
-    const avgSlippage24h = () => {
-        const s100 = _avgSlippage24h();
-        if (s100.length === 0) return ECs.zero();
-
-        return s100
-            .reduce((prev, cur) => prev.add(cur), ECs.zero())
-            .div(s100.length);
-    };
-
-    const [_avgTradeSize24h, setAvgTradeSize24h] = createSignal<ECs[]>([]);
-
-    const addTradeQuote = (tradeQuote: ECs) => {
-        setAvgTradeSize24h((t) => {
-            t.push(tradeQuote);
-            return [...t];
-        });
-    };
-
-    const avgTradeSize24h = () => {
-        const t100 = _avgTradeSize24h();
-        if (t100.length === 0) return ECs.zero();
-
-        return t100
-            .reduce((prev, cur) => prev.add(cur), ECs.zero())
-            .div(t100.length);
-    };
-
-    const [fees29d, setFees29d] = createSignal<ECs[]>([]);
-
-    const avgFees30d = () => {
-        const f29d = fees29d();
-        const fToday = today().fees;
-
-        if (fToday.isZero() && f29d.length === 0) return ECs.zero();
-
-        return f29d
-            .reduce((prev, cur) => prev.add(cur), ECs.zero())
-            .add(fToday)
-            .div(f29d.length + (fToday.isZero() ? 0 : 1));
-    };
-
-    const [volume29d, setVolume29d] = createSignal<ECs[]>([]);
-
-    const avgVolume30d = () => {
-        const v29d = volume29d();
-        const vToday = today().quoteVolume;
-
-        if (vToday.isZero() && v29d.length === 0) return ECs.zero();
-
-        return v29d
-            .reduce((prev, cur) => prev.add(cur), ECs.zero())
-            .add(vToday)
-            .div(v29d.length + (vToday.isZero() ? 0 : 1));
-    };
-
     const nextDay = (vol: ECs, f: ECs) => {
         setToday(({ day, quoteVolume, targetQuoteVolume, pivotTick, fees }) => {
             quoteVolume.addAssign(vol);
@@ -168,6 +134,64 @@ export function Simulation() {
         });
     };
 
+    const [_avgSlippage24h, setAvgSlippage24h] = createSignal<ECs[]>([]);
+    const addSlippage = (slippage: ECs) => {
+        setAvgSlippage24h((s) => {
+            s.push(slippage);
+            return [...s];
+        });
+    };
+    const avgSlippage24h = () => {
+        const s100 = _avgSlippage24h();
+        if (s100.length === 0) return ECs.zero();
+
+        return s100
+            .reduce((prev, cur) => prev.add(cur), ECs.zero())
+            .div(s100.length);
+    };
+
+    const [_avgTradeSize24h, setAvgTradeSize24h] = createSignal<ECs[]>([]);
+    const addTradeQuote = (tradeQuote: ECs) => {
+        setAvgTradeSize24h((t) => {
+            t.push(tradeQuote);
+            return [...t];
+        });
+    };
+    const avgTradeSize24h = () => {
+        const t100 = _avgTradeSize24h();
+        if (t100.length === 0) return ECs.zero();
+
+        return t100
+            .reduce((prev, cur) => prev.add(cur), ECs.zero())
+            .div(t100.length);
+    };
+
+    const [fees29d, setFees29d] = createSignal<ECs[]>([]);
+    const avgFees30d = () => {
+        const f29d = fees29d();
+        const fToday = today().fees;
+
+        if (fToday.isZero() && f29d.length === 0) return ECs.zero();
+
+        return f29d
+            .reduce((prev, cur) => prev.add(cur), ECs.zero())
+            .add(fToday)
+            .div(f29d.length + (fToday.isZero() ? 0 : 1));
+    };
+
+    const [volume29d, setVolume29d] = createSignal<ECs[]>([]);
+    const avgVolume30d = () => {
+        const v29d = volume29d();
+        const vToday = today().quoteVolume;
+
+        if (vToday.isZero() && v29d.length === 0) return ECs.zero();
+
+        return v29d
+            .reduce((prev, cur) => prev.add(cur), ECs.zero())
+            .add(vToday)
+            .div(v29d.length + (vToday.isZero() ? 0 : 1));
+    };
+
     const swap = (_args?: SwapArgs) => {
         const t = today();
 
@@ -179,74 +203,45 @@ export function Simulation() {
                   todayPivotTick: t.pivotTick,
               });
 
-        const cp = POOL.clone(false);
+        const quoteVolume =
+            args.direction === "base -> quote"
+                ? args.qtyIn.mul(Beacon.base(POOL).price(POOL.curAbsoluteTick))
+                : args.qtyIn.clone();
 
-        try {
-            const quoteVolume =
-                args.direction === "base -> quote"
-                    ? args.qtyIn.mul(Beacon.base(cp).price(cp.curAbsoluteTick))
-                    : args.qtyIn.clone();
+        const baseReserveBefore = POOL.overallReserve.base;
+        const quoteReserveBefore = POOL.overallReserve.quote;
 
-            const baseReserveBefore = cp.overallReserve.base;
-            const quoteReserveBefore = cp.overallReserve.quote;
+        const { qtyOut, feeFactor, feesIn, slippage } = POOL.swap(args);
 
-            const { qtyOut, feeFactor, feesIn, slippage } = cp.swap(args);
-            POOL = cp;
+        const statsAfter = POOL.stats;
+        const baseReserveAfter = POOL.overallReserve.base;
+        const quoteReserveAfter = POOL.overallReserve.quote;
 
-            const statsAfter = cp.stats;
-            const baseReserveAfter = cp.overallReserve.base;
-            const quoteReserveAfter = cp.overallReserve.quote;
-
-            if (baseReserveAfter.lt(baseReserveBefore)) {
-                panic(
-                    `Base reserve has decreased! (after - before = ${baseReserveAfter
-                        .sub(baseReserveBefore)
-                        .toString()})`
-                );
-            }
-
-            if (quoteReserveAfter.lt(quoteReserveBefore)) {
-                panic(
-                    `Quote reserve has decreased! (after - before = ${quoteReserveAfter
-                        .sub(quoteReserveBefore)
-                        .toString()})`
-                );
-            }
-
-            addTradeQuote(quoteVolume);
-            addSlippage(slippage);
-
-            setLiquidity(cp.liquidityDigest);
-            setStats(statsAfter);
-            setIl(cp.il);
-            setFeeFactor(feeFactor);
-
-            nextDay(quoteVolume, feesIn);
-        } catch (e) {
-            console.error("Bad swap, resetting...", e);
-            if (isRunning()) setRunning(false);
+        if (baseReserveAfter.lt(baseReserveBefore)) {
+            panic(
+                `Base reserve has decreased! (after - before = ${baseReserveAfter
+                    .sub(baseReserveBefore)
+                    .toString()})`
+            );
         }
-    };
 
-    onMount(async () => {
-        (window as any).swap = swap;
-
-        while (true) {
-            if (isRunning()) {
-                try {
-                    swap();
-                } catch (e) {
-                    setRunning(false);
-                    throw e;
-                }
-            }
-
-            await delay(5);
+        if (quoteReserveAfter.lt(quoteReserveBefore)) {
+            panic(
+                `Quote reserve has decreased! (after - before = ${quoteReserveAfter
+                    .sub(quoteReserveBefore)
+                    .toString()})`
+            );
         }
-    });
 
-    const handleRunClick = () => {
-        setRunning((r) => !r);
+        addTradeQuote(quoteVolume);
+        addSlippage(slippage);
+
+        setLiquidity(POOL.liquidityDigest);
+        setStats(statsAfter);
+        setIl(POOL.il);
+        setFeeFactor(feeFactor);
+
+        nextDay(quoteVolume, feesIn);
     };
 
     const quoteProfit = () => {
@@ -279,152 +274,131 @@ export function Simulation() {
         h: 0,
     });
 
+    const handleResize = () => {
+        setChartSize({
+            w: chartParent.clientWidth,
+            h: chartParent.clientHeight,
+        });
+    };
+
+    const handleScroll = () => {
+        if (window.scrollY === 0) {
+            if (props.isSim) {
+                setOpacity(0.6);
+            } else {
+                setOpacity(0.4);
+            }
+        } else {
+            setOpacity(0.2);
+        }
+    };
+
+    const [int, setInt] = createSignal<number | undefined>();
+
+    createEffect(() => {
+        if (window.scrollY === 0) {
+            if (props.isSim) {
+                setOpacity(0.6);
+            } else {
+                setOpacity(0.4);
+            }
+        } else {
+            setOpacity(0.2);
+        }
+    });
+
     onMount(() => {
         setChartSize({
             w: chartParent.clientWidth,
             h: chartParent.clientHeight,
         });
 
-        window.addEventListener("resize", () => {
-            setChartSize({
-                w: chartParent.clientWidth,
-                h: chartParent.clientHeight,
+        if (window.scrollY === 0) {
+            if (props.isSim) {
+                setOpacity(0.6);
+            } else {
+                setOpacity(0.4);
+            }
+        } else {
+            setOpacity(0.2);
+        }
+
+        window.addEventListener("resize", handleResize);
+        window.addEventListener("scroll", handleScroll);
+
+        (window as any).swap = swap;
+
+        setInt(
+            setInterval(() => {
+                if (props.updMetrics) {
+                    props.updMetrics({
+                        day: today().day,
+
+                        curPrice: absoluteTickToPrice(
+                            POOL.curAbsoluteTick,
+                            "base",
+                            "reserve"
+                        ),
+                        curFeeFactor: feeFactor().mul(100),
+
+                        avgAPR: avgFees30d()
+                            .div(POOL.tvlQuote)
+                            .mul(100 * 365),
+                        avgVolume: avgVolume30d(),
+                        avgFees: avgFees30d(),
+                        avgTxnSize: avgTradeSize24h(),
+                        avgSlippage: avgSlippage24h().mul(100),
+
+                        usdReserve: stats().quote.actualReserve,
+                        usdInventory: stats().quote.respectiveReserve,
+                        usdProfit: quoteProfit(),
+                        usdProfitPercent: quoteProfit()
+                            .div(POOL.depositedReserves.quote)
+                            .mul(100),
+                        usdIL: il().quote.mul(100),
+
+                        btcReserve: stats().base.actualReserve,
+                        btcInventory: stats().base.respectiveReserve,
+                        btcProfit: baseProfit(),
+                        btcProfitPercent: baseProfit()
+                            .div(POOL.depositedReserves.base)
+                            .mul(100),
+                        btcIL: il().base.mul(100),
+                    });
+                }
+            }, 100)
+        );
+    });
+
+    onMount(async () => {
+        while (true) {
+            if (isRunning()) swap();
+            await delay(Math.floor(((101 - speed()) / 100) * 1000));
+        }
+    });
+
+    onCleanup(() => {
+        if (int())
+            setInt((i) => {
+                clearInterval(i);
+                return undefined;
             });
-        });
+
+        window.removeEventListener("resize", handleResize);
+        window.removeEventListener("scroll", handleScroll);
     });
 
     return (
-        <div class="relative w-dvw h-dvh flex flex-col gap-10">
+        <div
+            class="fixed w-dvw h-dvh flex flex-col gap-10 transition-all bg-bg"
+            style={{ opacity: opacity() }}
+        >
             <div ref={chartParent} class="absolute w-dvw h-dvh overflow-hidden">
                 <LiquidityChart
                     liquidity={liquidity()}
                     containerWidth={chartSize().w}
                     containerHeight={chartSize().h}
                 />
-            </div>
-
-            <Logo class="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2" />
-
-            <div class="absolute bottom-4 left-4 right-4 flex flex-row items-center self-stretch justify-between px-4">
-                <p class="text-white underline">
-                    <a href="https://github.com/Drifty-Labs/drifty-dex">
-                        visualization of the actual algorithm
-                    </a>
-                </p>
-
-                <div class="flex flex-row gap-1">
-                    <a href="https://github.com/Drifty-Labs/drifty-dex">
-                        <GithubIcon />
-                    </a>
-                    <a href="https://t.me/driftyicp">
-                        <TelegramIcon />
-                    </a>
-                    <a href="twitter.com/msqwallet">
-                        <XIcon />
-                    </a>
-                </div>
-            </div>
-
-            <div class="relative flex flex-col gap-20 w-5xl text-white">
-                <div class="flex flex-row gap-5">
-                    <button
-                        type="submit"
-                        class="bg-white text-black"
-                        onclick={handleRunClick}
-                    >
-                        {isRunning() ? "Stop" : "Start"}
-                    </button>
-                    <div class="flex flex-row gap-2">
-                        <div class="flex flex-col gap-2">
-                            <p>Volatility (24h)</p>
-                            <input
-                                type="range"
-                                min={0.001}
-                                max={0.5}
-                                step={0.001}
-                                value={avgDailyVolatility().toNumber()}
-                                onchange={(e) =>
-                                    setAvgDailyVolatility(
-                                        ECs.fromString(e.currentTarget.value)
-                                    )
-                                }
-                            />
-                        </div>
-                        <p>{avgDailyVolatility().mul(100).toString(2)}%</p>
-                    </div>
-                </div>
-
-                <div class="flex flex-col gap-y-10">
-                    <div class="flex flex-row gap-x-10 gap-y-2 flex-wrap">
-                        <p>Day: {today().day}</p>
-                        <p>
-                            Daily Volume (avg. 30d): $
-                            {avgVolume30d().toShortString()}
-                        </p>
-                        <p>
-                            Daily Fees (avg. 30d): $
-                            {avgFees30d().toShortString()}
-                        </p>
-                        <p>
-                            APR (avg. 30d):{" "}
-                            {avgFees30d()
-                                .div(POOL.tvlQuote)
-                                .mul(100 * 365)
-                                .toShortString()}
-                            %
-                        </p>
-                        <p>
-                            Fee % (real-time):{" "}
-                            {feeFactor().mul(100).toString(4)}%
-                        </p>
-                        <p>
-                            Slippage % (avg. 24h):{" "}
-                            {avgSlippage24h().mul(100).toString(4)}%
-                        </p>
-                        <p>
-                            Trade Size (avg. 24h): $
-                            {avgTradeSize24h().toShortString()}
-                        </p>
-                    </div>
-
-                    <div class="flex flex-row justify-between">
-                        <div class="flex flex-col gap-2">
-                            <h3>USD AMM</h3>
-                            <p>
-                                Reserve: $
-                                {stats().quote.actualReserve.toShortString()}
-                            </p>
-                            <p>
-                                Inventory: $
-                                {stats().quote.respectiveReserve.toShortString()}
-                            </p>
-                            <p>
-                                Impermanent Loss:{" "}
-                                {il().quote.mul(100).toString(4)}%
-                            </p>
-                            <p>
-                                Total Profit: ${quoteProfit().toShortString()}
-                            </p>
-                        </div>
-
-                        <div class="flex flex-col gap-2">
-                            <h3>BTC AMM</h3>
-                            <p>
-                                Reserve: ₿
-                                {stats().base.actualReserve.toShortString()}
-                            </p>
-                            <p>
-                                Inventory: ₿
-                                {stats().base.respectiveReserve.toShortString()}
-                            </p>
-                            <p>
-                                Impermanent Loss:{" "}
-                                {il().base.mul(100).toString(4)}%
-                            </p>
-                            <p>Total Profit: ₿{baseProfit().toShortString()}</p>
-                        </div>
-                    </div>
-                </div>
             </div>
         </div>
     );
