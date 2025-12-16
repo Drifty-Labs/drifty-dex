@@ -289,7 +289,7 @@ export function LiquidityChart(props: LiquidityChartProps) {
 }
 
 function combineRanges(side: Side, ranges: RangeInner[]): RangeInner[] {
-    if (ranges.length <= 11) return ranges;
+    if (ranges.length <= 21) return ranges;
 
     const firstRange = side === "base" ? ranges[ranges.length - 1] : ranges[0];
     const otherRanges =
@@ -297,7 +297,7 @@ function combineRanges(side: Side, ranges: RangeInner[]): RangeInner[] {
             ? ranges.slice(0, ranges.length - 1)
             : ranges.slice(1, ranges.length);
 
-    const chunks = chunkify(otherRanges, 10);
+    const chunks = chunkify(otherRanges, 20);
     const combinedRanges: RangeInner[] = [];
 
     for (const chunk of chunks) {

@@ -54,6 +54,32 @@
                 src: url("/fonts/JetBrainsMono-Italic[wght].ttf")
                     format("truetype");
             }
+
+            #logo {
+                font-size: 80px;
+            }
+
+            #loader-content {
+                gap: 15px;
+            }
+
+            #loading {
+                font-size: 18px;
+            }
+
+            @media screen and (min-width: 1080px) {
+                #logo {
+                    font-size: 200px;
+                }
+
+                #loader-content {
+                    gap: 30px;
+                }
+
+                #loading {
+                    font-size: 24px;
+                }
+            }
         </style>
         <script>
             function randomInterval(callback, min, max) {
@@ -184,6 +210,7 @@
                 flex-flow: column nowrap;
                 align-items: center;
                 justify-content: center;
+                overflow: hidden;
             "
         >
             <div
@@ -191,7 +218,6 @@
                 style="
                     display: flex;
                     flex-flow: column nowrap;
-                    gap: 30px;
                     align-items: center;
                     justify-content: center;
                 "
@@ -202,7 +228,6 @@
                         position: relative;
                         font-family: JetBrainsMonoItalic, sans-serif;
                         font-weight: bold;
-                        font-size: 200px;
                         left: 0;
                         right: 0;
                         transition: left cubic-bezier(0.445, 0.05, 0.55, 0.95)
@@ -263,7 +288,6 @@
                         position: relative;
                         font-family: JetBrainsMono;
                         font-weight: 300;
-                        font-size: 24px;
                         color: white;
                         display: flex;
                     "
@@ -282,6 +306,21 @@
             </div>
         </div>
         <div id="root"></div>
+        <div
+            style="
+                overflow: hidden;
+                position: fixed;
+                width: 101dvw;
+                height: 101dvh;
+                top: 0;
+                left: 0;
+                background-image: linear-gradient(red, green, blue);
+                background-size: 1px 3px;
+                opacity: 0.15;
+                z-index: 100;
+                pointer-events: none;
+            "
+        ></div>
         <script type="module" src="/src/index.tsx"></script>
     </body>
 </html>

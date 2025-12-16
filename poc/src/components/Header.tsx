@@ -30,13 +30,13 @@ export const Header = (props: HeaderProps) => {
                 "opacity-0": props.isSim ? false : hidden(),
                 "opacity-100": props.isSim ? true : !hidden(),
             }}
-            class="fixed w-dvw flex flex-row gap-[10px] p-[40px] z-50 transition-opacity h-[114px]"
+            class="fixed w-dvw flex flex-row items-center gap-[10px] p-[20px] lg:p-[40px] z-50 transition-opacity bg-bg lg:bg-transparent"
         >
             <div class="flex-1">
                 <DriftyLogo height={34} />
             </div>
             <div class="flex flex-row gap-[24px] items-center">
-                <div class="flex flex-row gap-[16px]">
+                <div class="hidden lg:flex flex-row gap-[16px]">
                     <a
                         href="https://github.com/Drifty-Labs/drifty-dex"
                         target="_blank"

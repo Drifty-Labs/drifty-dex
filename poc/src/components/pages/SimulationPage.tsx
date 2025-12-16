@@ -21,9 +21,9 @@ export type SimulationPageProps = {
 
 export const SimulationPage = (props: SimulationPageProps) => {
     return (
-        <div class="w-dvw h-dvh relative flex flex-col pt-[134px] pb-[40px] px-[40px] font-main text-white">
+        <div class="w-dvw h-dvh relative flex flex-col pt-[100px] lg:pt-[134px] pb-[20px] lg:pb-[40px] px-[20px] lg:px-[40px] font-main text-white">
             <div class="flex flex-row flex-1 justify-between">
-                <div class="flex flex-col gap-[10px] items-start text-[14px] font-normal">
+                <div class="flex flex-col gap-[10px] items-start text-[14px] font-normal lg:text-white text-gray-400">
                     <p>
                         Day: <span class="font-bold">{props.metrics.day}</span>
                     </p>
@@ -57,9 +57,24 @@ export const SimulationPage = (props: SimulationPageProps) => {
                             ${props.metrics.avgFees.toShortString()}
                         </span>
                     </p>
+
+                    <div class="flex lg:hidden flex-col gap-[10px] text-white">
+                        <p>
+                            APR (avg 30d):{" "}
+                            <span class="font-bold">
+                                {props.metrics.avgAPR.toString(2)}%
+                            </span>
+                        </p>
+                        <p>
+                            Slippage (avg 30d):{" "}
+                            <span class="font-bold">
+                                {props.metrics.avgSlippage.toString(4)}%
+                            </span>
+                        </p>
+                    </div>
                 </div>
 
-                <div class="flex flex-col gap-[10px] w-[280px]">
+                <div class="hidden lg:flex flex-col gap-[10px] w-[280px]">
                     <div class="flex flex-row items-center justify-between">
                         <p class="font-extrabold text-[20px]">Speed</p>
                         <NumberInput
@@ -99,9 +114,11 @@ export const SimulationPage = (props: SimulationPageProps) => {
             </div>
 
             <div class="flex flex-row gap-[10px] justify-between items-end">
-                <div class="flex flex-col justify-start gap-[24px]">
-                    <p class="font-extrabold text-[36px]">USD AMM</p>
-                    <div class="flex flex-col justify-start gap-[12px] font-normal">
+                <div class="flex flex-col justify-start gap-4 lg:gap-[24px]">
+                    <p class="font-extrabold text-[24px] lg:text-[36px]">
+                        USD AMM
+                    </p>
+                    <div class="flex flex-col justify-start gap-[12px] font-normal text-[12px] lg:text-[14px]">
                         <p>
                             Reserve:{" "}
                             <span class="font-extrabold">
@@ -117,12 +134,19 @@ export const SimulationPage = (props: SimulationPageProps) => {
                         <p>
                             Profit:{" "}
                             <span class="font-extrabold">
-                                ${props.metrics.usdProfit.toShortString()} (
-                                {props.metrics.usdProfitPercent.toString(2)}%)
+                                ${props.metrics.usdProfit.toShortString()}{" "}
+                                <span class="hidden lg:inline">
+                                    (
+                                    {props.metrics.usdProfitPercent.toString(2)}
+                                    %)
+                                </span>
                             </span>
                         </p>
                         <p>
-                            Impermanent Loss:{" "}
+                            <span class="hidden lg:inline">
+                                Impermanent Loss
+                            </span>
+                            <span class="inline lg:hidden">IL</span>:{" "}
                             <span class="font-extrabold">
                                 {props.metrics.usdIL.toString(4)}%
                             </span>
@@ -130,7 +154,7 @@ export const SimulationPage = (props: SimulationPageProps) => {
                     </div>
                 </div>
 
-                <div class="flex flex-row gap-[40px] items-center justify-center">
+                <div class="hidden lg:flex flex-row gap-[40px] items-center justify-center">
                     <div class="flex flex-col gap-[10px]">
                         <p class="font-extrabold text-[48px]">
                             {props.metrics.avgAPR.toString(2)}%
@@ -148,9 +172,11 @@ export const SimulationPage = (props: SimulationPageProps) => {
                     </div>
                 </div>
 
-                <div class="flex flex-col justify-end gap-[24px] text-right">
-                    <p class="font-extrabold text-[36px]">BTC AMM</p>
-                    <div class="flex flex-col justify-end gap-[12px] font-normal">
+                <div class="flex flex-col justify-end gap-4 lg:gap-[24px] text-right">
+                    <p class="font-extrabold text-[24px] lg:text-[36px]">
+                        BTC AMM
+                    </p>
+                    <div class="flex flex-col justify-end gap-[12px] font-normal text-[12px] lg:text-[14px]">
                         <p>
                             Reserve:{" "}
                             <span class="font-extrabold">
@@ -166,12 +192,19 @@ export const SimulationPage = (props: SimulationPageProps) => {
                         <p>
                             Profit:{" "}
                             <span class="font-extrabold">
-                                ₿{props.metrics.btcProfit.toShortString()} (
-                                {props.metrics.btcProfitPercent.toString(2)}%)
+                                ₿{props.metrics.btcProfit.toShortString()}{" "}
+                                <span class="hidden lg:inline">
+                                    (
+                                    {props.metrics.btcProfitPercent.toString(2)}
+                                    %)
+                                </span>
                             </span>
                         </p>
                         <p>
-                            Impermanent Loss:{" "}
+                            <span class="hidden lg:inline">
+                                Impermanent Loss
+                            </span>
+                            <span class="inline lg:hidden">IL</span>:{" "}
                             <span class="font-extrabold">
                                 {props.metrics.btcIL.toString(4)}%
                             </span>
