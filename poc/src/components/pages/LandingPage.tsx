@@ -103,7 +103,17 @@ export const LandingPage = (props: LandingPageProps) => {
                 <div class="flex flex-row flex-nowrap items-center gap-[8px] text-white font-main text-[12px] lg:text-[16px]">
                     <p>with</p>
                     <BurnLogo height={24} />
-                    <p>from BURN community</p>
+                    <p>
+                        from{" "}
+                        <a
+                            href="https://app.icpswap.com/swap/pro?input=ryjl3-tyaaa-aaaaa-aaaba-cai&output=egjwt-lqaaa-aaaak-qi2aa-cai"
+                            target="_blank"
+                            class="underline cursor-pointer"
+                        >
+                            $BURN
+                        </a>{" "}
+                        community
+                    </p>
                     <CopyrightIcon class="[&>path]:fill-white" />
                     <p>{new Date().getFullYear()}</p>
                 </div>

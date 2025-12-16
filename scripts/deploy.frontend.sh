@@ -12,11 +12,11 @@ else
     network=$mode
 fi
 
-cd frontend
+cd poc
 file_name="./.env.$mode"
 
 if ! [ -f $file_name ]; then
   echo "Env file for $mode does not exist."
 fi
 
-bun run build --mode=$mode && dfx deploy --network=$network
+deno run build && dfx deploy --network=$network frontend

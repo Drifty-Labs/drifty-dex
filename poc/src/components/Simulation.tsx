@@ -211,7 +211,7 @@ export function Simulation(props: SimulationProps) {
         const baseReserveBefore = POOL.overallReserve.base;
         const quoteReserveBefore = POOL.overallReserve.quote;
 
-        const { qtyOut, feeFactor, feesIn, slippage } = POOL.swap(args);
+        const { feeFactor, feesIn, slippage } = POOL.swap(args);
 
         const statsAfter = POOL.stats;
         const baseReserveAfter = POOL.overallReserve.base;

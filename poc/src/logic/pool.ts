@@ -8,7 +8,6 @@ import {
     type AMMSwapDirection,
 } from "./utils.ts";
 import { Range } from "./range.ts";
-import { POOL } from "../components/Simulation.tsx";
 
 const STABLE_AMM_CUT = ECs.fromString("0.05");
 const MIN_FEES = ECs.fromString("0.0001");
