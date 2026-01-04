@@ -19,6 +19,7 @@ Drifty achieves this by blending concepts from modern CeDeFi and tailoring them 
 
 -   **Automatic Liquidity Management**: No need to manually manage your position.
 -   **Impermanent Loss Recovery**: The system is designed to recover your initial deposit, even if the token price rises.
+-   **Multi-Asset Pools**: Allow your liquidity to work in multiple pairs simultaneously, increasing the earnings.
 -   **Dynamic Fees**: Earn more when traders are greedy and attract volume when the market is stable.
 -   **Active Liquidity**: Your liquidity is automatically concentrated or relaxed based on market conditions to optimize earnings.
 -   **Efficient Price Discovery**: Minimizes losses during periods of high price volatility.
@@ -35,9 +36,8 @@ The articles in this series are intended to be read in sequence, as earlier entr
 ### Continue Reading
 
 -   [Ep. 1 — Why Drifty?](./ep1-why-drifty.md)
--   [Ep. 2 — The Liquidity Pool Lifecycle](./ep2-liquidity-pool-lifecycle.md)
--   [Ep. 3 — Impermanent Loss Recovery](./ep3-il-recovery.md)
--   (coming soon) [Ep. 4 — The LP Gateway]()
+-   [Ep. 2 — Pool Basics](./ep2-pool-basics.md)
+-   (coming soon) [Ep. 3 — Multi-Asset Pools]()
 
 ---
 

@@ -65,7 +65,7 @@ In essence, Drifty is not just another DEX; it's a foundational shift in how liq
 
 #### Read Next
 
-[Ep. 2 — The Liquidity Pool Lifecycle](./ep2-liquidity-pool-lifecycle.md)
+[Ep. 2 — Pool Basics](./ep2-pool-basics.md)
 
 ---
 
